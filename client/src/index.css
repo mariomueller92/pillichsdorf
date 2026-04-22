@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1e40af;
+  --color-primary-light: #3b82f6;
+  --color-success: #16a34a;
+  --color-success-light: #22c55e;
+  --color-danger: #dc2626;
+  --color-danger-light: #ef4444;
+  --color-warning: #d97706;
+  --color-warning-light: #f59e0b;
+  --color-table-frei: #22c55e;
+  --color-table-besetzt: #ef4444;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* High Contrast Mode */
+.high-contrast {
+  --color-primary: #0066ff;
+  --color-primary-light: #3399ff;
+}
+
+.high-contrast body,
+.high-contrast .bg-slate-100 {
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+.high-contrast .bg-white,
+.high-contrast .bg-slate-50 {
+  background-color: #1a1a1a !important;
+  color: #fff !important;
+}
+
+.high-contrast .bg-slate-800 {
+  background-color: #000 !important;
+}
+
+.high-contrast .text-slate-900,
+.high-contrast .text-slate-800,
+.high-contrast .text-slate-700,
+.high-contrast .text-slate-600,
+.high-contrast .text-slate-500 {
+  color: #e0e0e0 !important;
+}
+
+.high-contrast .text-slate-400,
+.high-contrast .text-slate-300 {
+  color: #aaa !important;
+}
+
+.high-contrast .border-slate-200,
+.high-contrast .border-slate-100,
+.high-contrast .border-slate-300 {
+  border-color: #444 !important;
+}
+
+.high-contrast button,
+.high-contrast a {
+  font-weight: 600;
+}
+
+.high-contrast .text-sm {
+  font-size: 0.9375rem !important;
+}
+
+.high-contrast .text-xs {
+  font-size: 0.8125rem !important;
+}
+
+/* Fixed bottom nav in HC */
+.high-contrast nav.fixed {
+  background-color: #111 !important;
+  border-color: #333 !important;
+}
