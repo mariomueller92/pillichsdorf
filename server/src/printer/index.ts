@@ -53,6 +53,8 @@ export function isPrinterEnabled(): boolean {
   return enabled;
 }
 
+const RAW_PRINT_SCRIPT = path.join(__dirname, 'raw-print.ps1');
+
 export function printRaw(content: string): boolean {
   if (!enabled) return false;
 
@@ -68,27 +70,18 @@ export function printRaw(content: string): boolean {
   fs.writeFileSync(tmpFile, buffer);
 
   try {
-    execSync(`copy /b "${tmpFile}" "\\\\localhost\\${printerName}"`, {
-      encoding: 'utf-8',
-      windowsHide: true,
-      timeout: 10000,
-    });
+    const output = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${RAW_PRINT_SCRIPT}" -PrinterName "${printerName}" -FilePath "${tmpFile}"`,
+      { encoding: 'utf-8', windowsHide: true, timeout: 10000 }
+    );
+    console.log(`[Drucker] ${output.trim()}`);
     fs.unlinkSync(tmpFile);
     return true;
   } catch (err) {
-    console.warn('[Drucker] copy /b fehlgeschlagen, versuche PowerShell-Fallback:', (err as Error).message);
-    try {
-      execSync(
-        `powershell -Command "Get-Content -Path '${tmpFile}' -AsByteStream | Out-Printer -Name '${printerName}'"`,
-        { encoding: 'utf-8', windowsHide: true, timeout: 10000 }
-      );
-      fs.unlinkSync(tmpFile);
-      return true;
-    } catch (err2) {
-      console.error('[Drucker] Fehler beim Drucken:', err2);
-      console.error(`[Drucker] Datei bleibt zur Diagnose: ${tmpFile}`);
-      return false;
-    }
+    const e = err as { stderr?: string; stdout?: string; message: string };
+    console.error('[Drucker] Fehler beim Drucken:', e.stderr?.trim() || e.message);
+    console.error(`[Drucker] Datei bleibt zur Diagnose: ${tmpFile}`);
+    return false;
   }
 }
 
