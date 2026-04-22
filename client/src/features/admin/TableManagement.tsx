@@ -12,7 +12,7 @@ export function TableManagement() {
   const [tables, setTables] = useState<Table[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Table | null>(null);
-  const [form, setForm] = useState({ table_number: '', capacity: '' });
+  const [form, setForm] = useState({ table_number: '', capacity: '', sort_order: '' });
 
   const fetch = async () => {
     const data = await tablesApi.getTables();
@@ -23,13 +23,18 @@ export function TableManagement() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ table_number: '', capacity: '' });
+    const nextSort = tables.length > 0 ? Math.max(...tables.map(t => t.sort_order ?? 0)) + 10 : 10;
+    setForm({ table_number: '', capacity: '', sort_order: String(nextSort) });
     setShowForm(true);
   };
 
   const openEdit = (table: Table) => {
     setEditing(table);
-    setForm({ table_number: table.table_number, capacity: table.capacity?.toString() || '' });
+    setForm({
+      table_number: table.table_number,
+      capacity: table.capacity?.toString() || '',
+      sort_order: String(table.sort_order ?? 0),
+    });
     setShowForm(true);
   };
 
@@ -38,6 +43,7 @@ export function TableManagement() {
       const body = {
         table_number: form.table_number,
         capacity: form.capacity ? parseInt(form.capacity) : null,
+        sort_order: form.sort_order ? parseInt(form.sort_order) : 0,
       };
       if (editing) {
         await tablesApi.updateTable(editing.id, body);
@@ -75,6 +81,7 @@ export function TableManagement() {
               <div className="font-medium">Tisch {table.table_number}</div>
               <div className="text-sm text-slate-500">
                 {table.capacity ? `${table.capacity} Plaetze` : 'Keine Angabe'}
+                <span className="ml-2 text-xs text-slate-400">Sortierung: {table.sort_order ?? 0}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -106,6 +113,13 @@ export function TableManagement() {
             min="1"
             value={form.capacity}
             onChange={e => setForm({ ...form, capacity: e.target.value })}
+          />
+          <Input
+            label="Sortierung (kleinere Zahl = frueher)"
+            type="number"
+            value={form.sort_order}
+            onChange={e => setForm({ ...form, sort_order: e.target.value })}
+            placeholder="z.B. 10, 20, 30..."
           />
           <Button onClick={handleSave} size="lg">Speichern</Button>
         </div>

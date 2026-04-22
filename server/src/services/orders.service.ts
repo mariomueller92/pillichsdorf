@@ -433,6 +433,51 @@ export function getTopItems(limit: number = 10) {
   `).all(limit);
 }
 
+export function listAllOrdersWithItems(filters: { from?: string; to?: string } = {}) {
+  const db = getDb();
+
+  let where = '1=1';
+  const params: any[] = [];
+  if (filters.from) { where += ' AND o.created_at >= ?'; params.push(filters.from); }
+  if (filters.to)   { where += ' AND o.created_at <  ?'; params.push(filters.to); }
+
+  const orders = db.prepare(`
+    SELECT o.*, u.display_name as waiter_name, t.table_number
+    FROM orders o
+    JOIN users u ON o.waiter_id = u.id
+    LEFT JOIN tables t ON o.table_id = t.id
+    WHERE ${where}
+    ORDER BY o.created_at DESC
+  `).all(...params) as any[];
+
+  if (orders.length === 0) return [];
+
+  const orderIds = orders.map(o => o.id);
+  const placeholders = orderIds.map(() => '?').join(',');
+  const items = db.prepare(`
+    SELECT oi.*, mi.name as item_name, mc.target as category_target, mc.name as category_name
+    FROM order_items oi
+    JOIN menu_items mi ON oi.menu_item_id = mi.id
+    JOIN menu_categories mc ON mi.category_id = mc.id
+    WHERE oi.order_id IN (${placeholders})
+    ORDER BY oi.created_at
+  `).all(...orderIds) as any[];
+
+  const itemsByOrder = new Map<number, any[]>();
+  for (const it of items) {
+    if (!itemsByOrder.has(it.order_id)) itemsByOrder.set(it.order_id, []);
+    itemsByOrder.get(it.order_id)!.push(it);
+  }
+
+  return orders.map(o => {
+    const orderItems = itemsByOrder.get(o.id) || [];
+    const total = orderItems
+      .filter(i => i.status !== 'storniert')
+      .reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
+    return { ...o, items: orderItems, total };
+  });
+}
+
 export function getPendingKitchenItems() {
   const db = getDb();
   return db.prepare(`

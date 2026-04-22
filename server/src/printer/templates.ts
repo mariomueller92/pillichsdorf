@@ -133,7 +133,7 @@ export function printBillBon(data: BillBonData): boolean {
 
   r.center().bold(true)
     .separator('=')
-    .line('WINZER PILLICHSDORF')
+    .line('RAINER WEIN')
     .separator('=')
     .left().bold(false)
     .line(tischLabel)

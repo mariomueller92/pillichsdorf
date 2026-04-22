@@ -32,7 +32,7 @@ export function AppShell() {
       {/* Top bar */}
       <header className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
         <div className="font-semibold text-sm">
-          Winzer Pillichsdorf
+          Rainer Wein
         </div>
         <div className="flex items-center gap-2">
           <button onClick={toggleHighContrast} className="p-1.5 rounded hover:bg-slate-700 active:scale-90" title="Kontrast">

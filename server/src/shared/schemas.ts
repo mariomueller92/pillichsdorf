@@ -69,11 +69,13 @@ export const toggleAvailabilityModeSchema = z.object({
 export const createTableSchema = z.object({
   table_number: z.string().min(1),
   capacity: z.number().int().positive().nullable().optional(),
+  sort_order: z.number().int().optional(),
 });
 
 export const updateTableSchema = z.object({
   table_number: z.string().min(1).optional(),
   capacity: z.number().int().positive().nullable().optional(),
+  sort_order: z.number().int().optional(),
   status: z.enum(['frei', 'besetzt', 'rechnung_angefordert']).optional(),
   is_active: z.number().min(0).max(1).optional(),
 });

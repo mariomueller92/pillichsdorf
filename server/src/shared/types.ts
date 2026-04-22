@@ -59,6 +59,7 @@ export interface Table {
   id: number;
   table_number: string;
   capacity: number | null;
+  sort_order: number;
   status: TableStatus;
   merged_into_id: number | null;
   is_active: number;

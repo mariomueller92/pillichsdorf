@@ -64,6 +64,7 @@ export function runMigrations(): void {
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       table_number    TEXT    NOT NULL UNIQUE,
       capacity        INTEGER,
+      sort_order      INTEGER NOT NULL DEFAULT 0,
       status          TEXT    NOT NULL DEFAULT 'frei'
                       CHECK (status IN ('frei', 'besetzt', 'rechnung_angefordert')),
       merged_into_id  INTEGER REFERENCES tables(id) ON DELETE SET NULL,
@@ -127,6 +128,13 @@ export function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_bills_table ON bills(table_id);
     CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
   `);
+
+  // Inkrementelle Migrationen fuer bestehende DBs
+  const tableCols = database.prepare("PRAGMA table_info(tables)").all() as { name: string }[];
+  if (!tableCols.some(c => c.name === 'sort_order')) {
+    database.exec("ALTER TABLE tables ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
+    console.log('[DB] Migration: Spalte tables.sort_order hinzugefuegt');
+  }
 
   console.log('[DB] Migrations ausgefuehrt');
 }

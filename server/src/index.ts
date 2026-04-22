@@ -48,7 +48,7 @@ if (fs.existsSync(clientDist)) {
   app.get('*', (_req, res) => {
     res.status(200).send(
       '<html><body style="font-family:sans-serif;text-align:center;padding:60px">' +
-      '<h2>Gastro Pillichsdorf - Backend laeuft</h2>' +
+      '<h2>Rainer Wein - Backend laeuft</h2>' +
       '<p>Frontend noch nicht gebaut. Entweder:</p>' +
       '<ul style="list-style:none"><li><b>Dev-Modus:</b> Oeffne <a href="http://localhost:5173">http://localhost:5173</a></li>' +
       '<li><b>Produktion:</b> Fuehre <code>cd client && npm run build</code> aus</li></ul>' +

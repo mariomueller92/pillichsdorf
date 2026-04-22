@@ -25,6 +25,12 @@ router.get('/pending-kitchen', auth, (_req: Request, res: Response) => {
   res.json(ordersService.getPendingKitchenItems());
 });
 
+router.get('/admin/all', auth, role(['admin']), (req: Request, res: Response) => {
+  const from = req.query.from as string | undefined;
+  const to = req.query.to as string | undefined;
+  res.json(ordersService.listAllOrdersWithItems({ from, to }));
+});
+
 router.get('/top-items', auth, (req: Request, res: Response) => {
   const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit as string))) : 10;
   res.json(ordersService.getTopItems(limit));

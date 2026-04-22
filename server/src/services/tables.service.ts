@@ -28,7 +28,7 @@ export function listTables(): Table[] {
       ) AS session_started_at
     FROM tables t
     WHERE t.is_active = 1
-    ORDER BY t.table_number
+    ORDER BY t.sort_order, t.table_number
   `).all() as Table[];
 }
 
@@ -38,18 +38,24 @@ export function getTable(id: number): Table {
   return table;
 }
 
-export function createTable(data: { table_number: string; capacity?: number | null }): Table {
-  try {
-    const result = getDb().prepare(
-      'INSERT INTO tables (table_number, capacity) VALUES (?, ?)'
-    ).run(data.table_number, data.capacity ?? null);
-    return getTable(result.lastInsertRowid as number);
-  } catch (err: any) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+export function createTable(data: { table_number: string; capacity?: number | null; sort_order?: number }): Table {
+  const db = getDb();
+  const existing = db.prepare('SELECT id, is_active FROM tables WHERE table_number = ?').get(data.table_number) as { id: number; is_active: number } | undefined;
+
+  if (existing) {
+    if (existing.is_active === 1) {
       throw new AppError(409, 'Tischnummer bereits vergeben');
     }
-    throw err;
+    db.prepare(
+      "UPDATE tables SET is_active = 1, status = 'frei', capacity = ?, sort_order = ?, merged_into_id = NULL, updated_at = datetime('now') WHERE id = ?"
+    ).run(data.capacity ?? null, data.sort_order ?? 0, existing.id);
+    return getTable(existing.id);
   }
+
+  const result = db.prepare(
+    'INSERT INTO tables (table_number, capacity, sort_order) VALUES (?, ?, ?)'
+  ).run(data.table_number, data.capacity ?? null, data.sort_order ?? 0);
+  return getTable(result.lastInsertRowid as number);
 }
 
 export function updateTable(id: number, data: Partial<Table>): Table {
@@ -59,6 +65,7 @@ export function updateTable(id: number, data: Partial<Table>): Table {
 
   if (data.table_number !== undefined) { updates.push('table_number = ?'); values.push(data.table_number); }
   if (data.capacity !== undefined) { updates.push('capacity = ?'); values.push(data.capacity); }
+  if ((data as any).sort_order !== undefined) { updates.push('sort_order = ?'); values.push((data as any).sort_order); }
   if (data.status !== undefined) { updates.push('status = ?'); values.push(data.status); }
   if (data.is_active !== undefined) { updates.push('is_active = ?'); values.push(data.is_active); }
 

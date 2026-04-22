@@ -19,6 +19,7 @@ import { UserManagement } from '@/features/admin/UserManagement';
 import { MenuManagement } from '@/features/admin/MenuManagement';
 import { TableManagement } from '@/features/admin/TableManagement';
 import { AdminLayout } from '@/features/admin/AdminLayout';
+import { AdminOrders } from '@/features/admin/AdminOrders';
 
 export default function App() {
   const restore = useAuthStore(s => s.restore);
@@ -61,6 +62,7 @@ export default function App() {
                   <Route path="benutzer" element={<UserManagement />} />
                   <Route path="speisekarte" element={<MenuManagement />} />
                   <Route path="tische" element={<TableManagement />} />
+                  <Route path="bestellungen" element={<AdminOrders />} />
                 </Route>
               </Route>
             </Route>

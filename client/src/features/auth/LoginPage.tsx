@@ -55,7 +55,7 @@ export function LoginPage() {
   return (
     <div className="min-h-dvh bg-slate-800 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-white text-center mb-2">Gastro Pillichsdorf</h1>
+        <h1 className="text-2xl font-bold text-white text-center mb-2">Rainer Wein</h1>
         <p className="text-slate-400 text-center mb-8">Anmeldung</p>
 
         {/* Mode toggle */}

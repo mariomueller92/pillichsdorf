@@ -6,6 +6,11 @@ export async function getOrders(filters?: { table_id?: number; status?: string }
   return data;
 }
 
+export async function getAllOrdersAdmin(filters?: { from?: string; to?: string }): Promise<any[]> {
+  const { data } = await api.get('/orders/admin/all', { params: filters });
+  return data;
+}
+
 export async function getActiveOrders(target?: string): Promise<Order[]> {
   const { data } = await api.get<Order[]>('/orders/active', { params: target ? { target } : {} });
   return data;

@@ -13,6 +13,7 @@ export function AdminLayout() {
           <NavLink to="/admin/speisekarte" className={tabClass}>Speisekarte</NavLink>
           <NavLink to="/admin/tische" className={tabClass}>Tische</NavLink>
           <NavLink to="/admin/benutzer" className={tabClass}>Benutzer</NavLink>
+          <NavLink to="/admin/bestellungen" className={tabClass}>Bestellungen</NavLink>
         </div>
       </div>
       <Outlet />
