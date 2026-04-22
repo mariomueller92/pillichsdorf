@@ -110,21 +110,56 @@ export function settleTable(
   socketService.emitTableStatusChanged({ tableId, status: 'frei' });
   socketService.emitBillSettled({ billId: result, tableId, total });
 
-  // Print bill bon
+  if (data.print_bon) {
+    const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
+    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
+    printBillBon({
+      tableNumber: table?.table_number || null,
+      barSlot: null,
+      waiterName: waiter?.display_name || '',
+      items: summary.items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
+      subtotal: summary.subtotal,
+      discountType: data.discount_type,
+      discountValue: data.discount_value,
+      total,
+    });
+  }
+
+  return bill;
+}
+
+export function printBillForTable(tableId: number, waiterId: number) {
+  const db = getDb();
+  const summary = getTableSummary(tableId);
+  if (summary.items.length === 0) {
+    throw new AppError(400, 'Keine offenen Posten fuer diesen Tisch');
+  }
+
   const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
   const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
-  printBillBon({
+
+  const ok = printBillBon({
     tableNumber: table?.table_number || null,
     barSlot: null,
     waiterName: waiter?.display_name || '',
     items: summary.items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
     subtotal: summary.subtotal,
-    discountType: data.discount_type,
-    discountValue: data.discount_value,
-    total,
+    discountType: null,
+    discountValue: 0,
+    total: summary.subtotal,
   });
 
-  return bill;
+  db.prepare(
+    "UPDATE tables SET status = 'rechnung_angefordert', updated_at = datetime('now') WHERE id = ?"
+  ).run(tableId);
+
+  socketService.emitTableStatusChanged({
+    tableId,
+    tableNumber: table?.table_number,
+    status: 'rechnung_angefordert',
+  });
+
+  return { printed: ok, subtotal: summary.subtotal };
 }
 
 export function settleItems(

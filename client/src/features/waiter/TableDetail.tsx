@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Table } from '@/types';
 import * as ordersApi from '@/api/orders.api';
 import * as dashboardApi from '@/api/dashboard.api';
+import * as billingApi from '@/api/billing.api';
 import { toast } from 'sonner';
 import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock } from 'lucide-react';
 import { formatDbTimeHM, minutesSince } from '@/utils/time';
@@ -151,10 +152,12 @@ export function TableDetail() {
         <Button variant="warning" onClick={async () => {
           if (!id) return;
           try {
-            await dashboardApi.requestBill(parseInt(id));
-            toast.success('Rechnung angefordert');
+            await billingApi.printBill(parseInt(id));
+            toast.success('Rechnung gedruckt');
             loadTable();
-          } catch { toast.error('Fehler'); }
+          } catch (err: any) {
+            toast.error(err?.response?.data?.error || 'Druck fehlgeschlagen');
+          }
         }} size="md">
           <span className="flex items-center gap-2"><Bell size={18} /> Rechnung</span>
         </Button>

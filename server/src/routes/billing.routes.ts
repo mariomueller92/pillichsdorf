@@ -20,6 +20,12 @@ router.post('/table/:tableId/settle', auth, role(['admin', 'kellner']), validate
   } catch (err) { next(err); }
 });
 
+router.post('/table/:tableId/print-bill', auth, role(['admin', 'kellner']), (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(billingService.printBillForTable(parseInt(req.params.tableId), req.user!.userId));
+  } catch (err) { next(err); }
+});
+
 router.post('/settle-items', auth, role(['admin', 'kellner']), validate(settleItemsSchema), (req: Request, res: Response, next: NextFunction) => {
   try {
     const bill = billingService.settleItems(req.body.table_id, req.user!.userId, req.body.order_item_ids, req.body);

@@ -5,6 +5,11 @@ export async function getTableSummary(tableId: number): Promise<any> {
   return data;
 }
 
+export async function printBill(tableId: number): Promise<any> {
+  const { data } = await api.post(`/billing/table/${tableId}/print-bill`);
+  return data;
+}
+
 export async function settleTable(tableId: number, body: {
   discount_type?: string | null;
   discount_value?: number;
