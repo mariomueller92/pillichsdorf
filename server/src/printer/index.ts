@@ -56,10 +56,18 @@ export function isPrinterEnabled(): boolean {
 export function printRaw(content: string): boolean {
   if (!enabled) return false;
 
+  const buffer = Buffer.from(content, 'binary');
+  console.log(`[Drucker] printRaw: ${buffer.length} Bytes, Drucker="${printerName}"`);
+
+  if (buffer.length === 0) {
+    console.error('[Drucker] Inhalt ist leer - nichts zu drucken');
+    return false;
+  }
+
+  const tmpFile = path.join(os.tmpdir(), `gastro-bon-${Date.now()}.bin`);
+  fs.writeFileSync(tmpFile, buffer);
+
   try {
-    // Write ESC/POS data to temp file, then send to printer via Windows copy command
-    const tmpFile = path.join(os.tmpdir(), `gastro-bon-${Date.now()}.bin`);
-    fs.writeFileSync(tmpFile, content, 'binary');
     execSync(`copy /b "${tmpFile}" "\\\\localhost\\${printerName}"`, {
       encoding: 'utf-8',
       windowsHide: true,
@@ -68,18 +76,17 @@ export function printRaw(content: string): boolean {
     fs.unlinkSync(tmpFile);
     return true;
   } catch (err) {
-    // Fallback: try via PowerShell Out-Printer
+    console.warn('[Drucker] copy /b fehlgeschlagen, versuche PowerShell-Fallback:', (err as Error).message);
     try {
-      const tmpFile = path.join(os.tmpdir(), `gastro-bon-${Date.now()}.bin`);
-      fs.writeFileSync(tmpFile, content, 'binary');
       execSync(
-        `powershell -Command "Get-Content -Path '${tmpFile}' -Raw -Encoding Byte | Out-Printer -Name '${printerName}'"`,
+        `powershell -Command "Get-Content -Path '${tmpFile}' -AsByteStream | Out-Printer -Name '${printerName}'"`,
         { encoding: 'utf-8', windowsHide: true, timeout: 10000 }
       );
       fs.unlinkSync(tmpFile);
       return true;
     } catch (err2) {
       console.error('[Drucker] Fehler beim Drucken:', err2);
+      console.error(`[Drucker] Datei bleibt zur Diagnose: ${tmpFile}`);
       return false;
     }
   }
