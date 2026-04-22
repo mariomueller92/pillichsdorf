@@ -32,3 +32,8 @@ export async function mergeTables(primaryTableId: number, secondaryTableIds: num
 export async function unmergeTables(tableId: number): Promise<void> {
   await api.post('/tables/unmerge', { table_id: tableId });
 }
+
+export async function releaseTable(tableId: number): Promise<Table> {
+  const { data } = await api.post<Table>(`/tables/${tableId}/release`);
+  return data;
+}

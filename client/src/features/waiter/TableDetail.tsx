@@ -12,7 +12,7 @@ import * as ordersApi from '@/api/orders.api';
 import * as dashboardApi from '@/api/dashboard.api';
 import * as billingApi from '@/api/billing.api';
 import { toast } from 'sonner';
-import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock } from 'lucide-react';
+import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock, DoorOpen } from 'lucide-react';
 import { formatDbTimeHM, minutesSince } from '@/utils/time';
 
 const itemStatusBadge: Record<string, { label: string; variant: 'warning' | 'info' | 'success' | 'danger' | 'neutral' }> = {
@@ -166,6 +166,24 @@ export function TableDetail() {
         </Button>
         <Button variant="ghost" onClick={() => setShowTransfer(true)} size="md">
           <span className="flex items-center gap-2"><ArrowRightLeft size={18} /> Transfer</span>
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={async () => {
+            if (!id) return;
+            if (!confirm('Tisch freigeben? Der Tisch wird als frei markiert.')) return;
+            try {
+              await tablesApi.releaseTable(parseInt(id));
+              toast.success('Tisch freigegeben');
+              navigate('/tische');
+            } catch (err: any) {
+              toast.error(err?.response?.data?.error || 'Freigabe fehlgeschlagen');
+            }
+          }}
+          size="md"
+          className="col-span-2"
+        >
+          <span className="flex items-center gap-2"><DoorOpen size={18} /> Tisch freigeben</span>
         </Button>
       </div>
 

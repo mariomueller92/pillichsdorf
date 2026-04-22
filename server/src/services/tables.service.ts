@@ -123,6 +123,56 @@ export function unmergeTables(tableId: number): void {
   })();
 }
 
+export function releaseTable(tableId: number): Table {
+  const db = getDb();
+  const table = getTable(tableId);
+
+  const openOrders = db.prepare(
+    "SELECT COUNT(*) as count FROM orders WHERE table_id = ? AND status IN ('offen', 'in_bearbeitung', 'fertig')"
+  ).get(tableId) as { count: number };
+  if (openOrders.count > 0) {
+    throw new AppError(400, 'Tisch hat offene Bestellungen und kann nicht freigegeben werden');
+  }
+
+  const unbilled = db.prepare(`
+    SELECT COUNT(*) as count
+    FROM order_items oi
+    JOIN orders o ON oi.order_id = o.id
+    WHERE o.table_id = ?
+      AND oi.status != 'storniert'
+      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
+  `).get(tableId) as { count: number };
+  if (unbilled.count > 0) {
+    throw new AppError(400, 'Tisch hat nicht abgerechnete Posten');
+  }
+
+  db.transaction(() => {
+    const mergedTables = db.prepare('SELECT id FROM tables WHERE merged_into_id = ?').all(tableId) as { id: number }[];
+    if (mergedTables.length > 0) {
+      db.prepare(
+        "UPDATE tables SET merged_into_id = NULL, updated_at = datetime('now') WHERE merged_into_id = ?"
+      ).run(tableId);
+      for (const mt of mergedTables) {
+        db.prepare(
+          "UPDATE tables SET status = 'frei', updated_at = datetime('now') WHERE id = ?"
+        ).run(mt.id);
+        socketService.emitTableStatusChanged({ tableId: mt.id, status: 'frei' });
+      }
+    }
+    db.prepare(
+      "UPDATE tables SET status = 'frei', updated_at = datetime('now') WHERE id = ?"
+    ).run(tableId);
+  })();
+
+  const updated = getTable(tableId);
+  socketService.emitTableStatusChanged({
+    tableId: updated.id,
+    tableNumber: updated.table_number,
+    status: 'frei',
+  });
+  return updated;
+}
+
 export function requestBill(tableId: number): Table {
   const table = getTable(tableId);
   getDb().prepare(

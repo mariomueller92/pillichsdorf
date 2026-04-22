@@ -1,7 +1,6 @@
 import { getDb } from '../database.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as socketService from './socket.service.js';
-import { unmergeTables } from './tables.service.js';
 import { printBillBon } from '../printer/templates.js';
 
 export function getTableSummary(tableId: number) {
@@ -90,24 +89,11 @@ export function settleTable(
         AND status != 'storniert'
     `).run(tableId);
 
-    // Free the table
-    db.prepare("UPDATE tables SET status = 'frei', updated_at = datetime('now') WHERE id = ?").run(tableId);
-
-    // Unmerge any merged tables
-    const mergedTables = db.prepare('SELECT id FROM tables WHERE merged_into_id = ?').all(tableId) as any[];
-    if (mergedTables.length > 0) {
-      unmergeTables(tableId);
-      for (const mt of mergedTables) {
-        db.prepare("UPDATE tables SET status = 'frei', updated_at = datetime('now') WHERE id = ?").run(mt.id);
-      }
-    }
-
     return billId;
   })();
 
   const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(result) as any;
 
-  socketService.emitTableStatusChanged({ tableId, status: 'frei' });
   socketService.emitBillSettled({ billId: result, tableId, total });
 
   if (data.print_bon) {
@@ -175,13 +161,17 @@ export function settleItems(
 ) {
   const db = getDb();
 
-  // Fetch the specific items
+  // Fetch the specific items (excluding already-billed ones)
   const placeholders = orderItemIds.map(() => '?').join(',');
   const items = db.prepare(`
-    SELECT oi.*, o.table_id
+    SELECT oi.*, mi.name as item_name, o.table_id
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
-    WHERE oi.id IN (${placeholders}) AND o.table_id = ? AND oi.status != 'storniert'
+    JOIN menu_items mi ON oi.menu_item_id = mi.id
+    WHERE oi.id IN (${placeholders})
+      AND o.table_id = ?
+      AND oi.status != 'storniert'
+      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
   `).all(...orderItemIds, tableId) as any[];
 
   if (items.length === 0) {
@@ -216,13 +206,29 @@ export function settleItems(
       insertBillItem.run(id, item.id, item.quantity, item.unit_price);
     }
 
-    // Mark these specific items as serviert
-    for (const itemId of orderItemIds) {
-      db.prepare("UPDATE order_items SET status = 'serviert' WHERE id = ?").run(itemId);
+    // Mark the actually-processed items as serviert (ignore stale/already-billed ids)
+    const markStmt = db.prepare("UPDATE order_items SET status = 'serviert' WHERE id = ?");
+    for (const item of items) {
+      markStmt.run(item.id);
     }
 
     return id;
   })();
+
+  if (data.print_bon) {
+    const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
+    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
+    printBillBon({
+      tableNumber: table?.table_number || null,
+      barSlot: null,
+      waiterName: waiter?.display_name || '',
+      items: items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
+      subtotal,
+      discountType,
+      discountValue,
+      total,
+    });
+  }
 
   return db.prepare('SELECT * FROM bills WHERE id = ?').get(billId);
 }

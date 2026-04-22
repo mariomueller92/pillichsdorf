@@ -62,4 +62,11 @@ router.post('/:id/request-bill', auth, role(['kellner', 'admin']), (req: Request
   } catch (err) { next(err); }
 });
 
+router.post('/:id/release', auth, role(['kellner', 'admin']), (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const table = tablesService.releaseTable(parseInt(req.params.id));
+    res.json(table);
+  } catch (err) { next(err); }
+});
+
 export default router;
