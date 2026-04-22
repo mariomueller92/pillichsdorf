@@ -47,16 +47,27 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
 
   const r = buildReceipt();
 
-  // Header
-  r.center().bold(true)
-    .separator('=')
-    .line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}`)
-    .line(`${tischLabel} / ${time}`)
-    .line(`Kellner: ${data.waiterName}`)
-    .separator('=');
+  const printHeader = () => {
+    r.center().bold(true)
+      .separator('=')
+      .line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}`)
+      .line(`${tischLabel} / ${time}`)
+      .line(`Kellner: ${data.waiterName}`)
+      .separator('=');
+  };
+
+  const printBigTable = () => {
+    r.center().bold(true).big(true)
+      .line(`*** ${tischLabel} ***`)
+      .big(false).bold(false).left();
+  };
 
   // === SOFORT section (always printed) ===
+  printHeader();
   r.left().bold(true).line('--- SOFORT (Theke) ---').bold(false);
+  r.feed(1);
+  printBigTable();
+  r.feed(1);
 
   if (sofortItems.length === 0) {
     r.line('  (keine)');
@@ -74,21 +85,18 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
     r.separator('-').line(`NOTIZ: ${data.notes}`);
   }
 
-  r.separator('-');
+  // strichlierte Trennlinie zwischen Schank und Kueche
+  r.line('- '.repeat(Math.floor(32 / 2)));
 
   // === KUECHE section (only if kitchen items exist) ===
   if (kuecheItems.length > 0) {
     // 15 blank lines as tear zone
     r.feed(15);
 
-    r.bold(true).line('--- KUECHE ---').bold(false);
+    printHeader();
+    r.left().bold(true).line('--- KUECHE ---').bold(false);
     r.feed(1);
-
-    // EXTRA LARGE table number
-    r.center().bold(true).big(true)
-      .line(`*** ${tischLabel} ***`)
-      .big(false).bold(false).left();
-
+    printBigTable();
     r.feed(1);
 
     for (const item of kuecheItems) {

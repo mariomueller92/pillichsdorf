@@ -24,7 +24,7 @@ public class RawPrinterHelper {
     public static extern bool ClosePrinter(IntPtr hPrinter);
 
     [DllImport("winspool.Drv", EntryPoint="StartDocPrinterW", SetLastError=true, CharSet=CharSet.Unicode, ExactSpelling=true)]
-    public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFOW di);
+    public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In] ref DOCINFOW di);
 
     [DllImport("winspool.Drv", EntryPoint="EndDocPrinter", SetLastError=true, ExactSpelling=true)]
     public static extern bool EndDocPrinter(IntPtr hPrinter);
@@ -45,7 +45,7 @@ public class RawPrinterHelper {
         }
         try {
             DOCINFOW di = new DOCINFOW { pDocName = "ESC/POS Bon", pDataType = "RAW" };
-            if (!StartDocPrinter(hPrinter, 1, di)) {
+            if (!StartDocPrinter(hPrinter, 1, ref di)) {
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "StartDocPrinter failed");
             }
             try {
