@@ -66,7 +66,7 @@ export function BillingScreen() {
   const undeliveredItems = summary?.items.filter((i: any) => i.status !== DELIVERED_STATUS) ?? [];
   const hasItems = summary && summary.items.length > 0;
 
-  const handleSettle = async () => {
+  const handleSettle = async (withPrint: boolean) => {
     if (!tischId || !summary) return;
 
     if (undeliveredItems.length > 0) {
@@ -84,9 +84,9 @@ export function BillingScreen() {
       await billingApi.settleTable(parseInt(tischId), {
         discount_type: discountType,
         discount_value: discountValue,
-        print_bon: true,
+        print_bon: withPrint,
       });
-      toast.success('Tisch abgerechnet!');
+      toast.success(withPrint ? 'Tisch abgerechnet & Bon gedruckt' : 'Tisch abgerechnet (ohne Druck)');
       // Popup: Tisch freigeben oder besetzt lassen?
       setShowFreePrompt(true);
     } catch (err: any) {
@@ -332,15 +332,29 @@ export function BillingScreen() {
         </span>
       </div>
 
-      <Button
-        onClick={handleSettle}
-        disabled={settling || !hasItems || splitMode}
-        size="lg"
-        variant="success"
-        className="w-full"
-      >
-        {settling ? 'Abrechnen...' : hasItems ? 'Gesamt - Bezahlt & Drucken' : 'Keine offenen Posten'}
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button
+          onClick={() => handleSettle(false)}
+          disabled={settling || !hasItems || splitMode}
+          size="lg"
+          variant="ghost"
+          className="w-full"
+        >
+          {settling ? 'Abrechnen...' : 'Bezahlen (ohne Druck)'}
+        </Button>
+        <Button
+          onClick={() => handleSettle(true)}
+          disabled={settling || !hasItems || splitMode}
+          size="lg"
+          variant="success"
+          className="w-full"
+        >
+          <span className="flex items-center justify-center gap-2">
+            <Printer size={16} />
+            {settling ? 'Abrechnen...' : hasItems ? 'Bezahlen & Drucken' : 'Keine offenen Posten'}
+          </span>
+        </Button>
+      </div>
     </div>
   );
 }
