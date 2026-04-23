@@ -28,7 +28,7 @@ export function OrderQueueView({ target, title }: OrderQueueViewProps) {
     try {
       await ordersApi.acknowledgeOrder(orderId, itemIds, status);
       await fetchActiveOrders(target);
-      toast.success(status === 'fertig' ? 'Als fertig markiert!' : 'Bestaetigt!');
+      toast.success(status === 'fertig' ? 'Als fertig markiert!' : 'Bestätigt!');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Fehler');
     }
@@ -120,7 +120,7 @@ export function OrderQueueView({ target, title }: OrderQueueViewProps) {
                     className="flex-1"
                     onClick={() => handleAcknowledge(order.id, newItemIds, 'in_zubereitung')}
                   >
-                    Bestaetigen
+                    Bestätigen
                   </Button>
                 )}
                 {(inProgressItems.length > 0 || newItems.length > 0) && (

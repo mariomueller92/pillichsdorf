@@ -45,7 +45,7 @@ export function settleTable(
   const summary = getTableSummary(tableId);
 
   if (summary.items.length === 0) {
-    throw new AppError(400, 'Keine offenen Posten fuer diesen Tisch');
+    throw new AppError(400, 'Keine offenen Posten für diesen Tisch');
   }
 
   let total = summary.subtotal;
@@ -118,7 +118,7 @@ export function printBillForTable(tableId: number, waiterId: number) {
   const db = getDb();
   const summary = getTableSummary(tableId);
   if (summary.items.length === 0) {
-    throw new AppError(400, 'Keine offenen Posten fuer diesen Tisch');
+    throw new AppError(400, 'Keine offenen Posten für diesen Tisch');
   }
 
   const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;

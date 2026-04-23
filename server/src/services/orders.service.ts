@@ -89,7 +89,7 @@ export function createOrder(data: {
     for (const item of data.items) {
       const menuItem = db.prepare('SELECT price, is_available FROM menu_items WHERE id = ? AND is_active = 1').get(item.menu_item_id) as any;
       if (!menuItem) throw new AppError(400, `Artikel ${item.menu_item_id} nicht gefunden`);
-      if (!menuItem.is_available) throw new AppError(400, `Artikel ${item.menu_item_id} nicht verfuegbar`);
+      if (!menuItem.is_available) throw new AppError(400, `Artikel ${item.menu_item_id} nicht verfügbar`);
       insertItem.run(orderId, item.menu_item_id, item.quantity, menuItem.price, item.notes || null);
     }
 
@@ -162,7 +162,7 @@ export function addItems(orderId: number, items: Array<{ menu_item_id: number; q
     for (const item of items) {
       const menuItem = db.prepare('SELECT price, is_available FROM menu_items WHERE id = ? AND is_active = 1').get(item.menu_item_id) as any;
       if (!menuItem) throw new AppError(400, `Artikel ${item.menu_item_id} nicht gefunden`);
-      if (!menuItem.is_available) throw new AppError(400, `Artikel ${item.menu_item_id} nicht verfuegbar`);
+      if (!menuItem.is_available) throw new AppError(400, `Artikel ${item.menu_item_id} nicht verfügbar`);
       insertItem.run(orderId, item.menu_item_id, item.quantity, menuItem.price, item.notes || null);
     }
     db.prepare("UPDATE orders SET updated_at = datetime('now') WHERE id = ?").run(orderId);

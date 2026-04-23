@@ -112,7 +112,7 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
     r.center().line(CUT_MARK_LINE).line('>>>>  ABRISS  <<<<').line(CUT_MARK_LINE).left();
     r.feed(2);
 
-    printHeader('--- KUECHE ---');
+    printHeader('--- KÜCHE ---');
     printBigTableHeader();
     r.feed(1);
     printItems(kuecheItems);
@@ -191,6 +191,11 @@ export function printBillBon(data: BillBonData): boolean {
     .huge(false).bold(false)
     .separator('=')
     .center().line(config.company.footer)
+    .feed(1)
+    .line('Rainer Wein')
+    .line('Weingut Zechmeister')
+    .line('Boindlfeld')
+    .line('2211 Pillichsdorf')
     .feed(1)
     .line('Powered by (c) MMUELLER')
     .feed(1);
