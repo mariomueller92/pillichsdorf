@@ -201,7 +201,172 @@ export function runMigrations(): void {
     console.log('[DB] Migration: Spalte tables.sort_order hinzugefuegt');
   }
 
+  const menuItemCols = database.prepare("PRAGMA table_info(menu_items)").all() as { name: string }[];
+  if (!menuItemCols.some(c => c.name === 'availability_mode')) {
+    database.exec("ALTER TABLE menu_items ADD COLUMN availability_mode TEXT NOT NULL DEFAULT 'sofort' CHECK (availability_mode IN ('sofort', 'lieferzeit'))");
+    console.log('[DB] Migration: Spalte menu_items.availability_mode hinzugefügt');
+  }
+
+  // ----------------------------------------------------------------
+  // Daten-Migrationen (einmalig, idempotent über applied_migrations)
+  // ----------------------------------------------------------------
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS applied_migrations (
+      name        TEXT PRIMARY KEY,
+      applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  runDataMigration(database, 'seed_menu_kgf_april26', seedMenuKgfApril26);
+
   console.log('[DB] Migrations ausgefuehrt');
+}
+
+/**
+ * Führt eine benannte Daten-Migration genau einmal aus.
+ * Marker liegt in applied_migrations; komplette Migration läuft in einer Transaktion.
+ */
+function runDataMigration(db: Database.Database, name: string, fn: (db: Database.Database) => void): void {
+  const already = db.prepare('SELECT 1 FROM applied_migrations WHERE name = ?').get(name);
+  if (already) return;
+  const tx = db.transaction(() => {
+    fn(db);
+    db.prepare('INSERT INTO applied_migrations (name) VALUES (?)').run(name);
+  });
+  tx();
+  console.log(`[DB] Migration angewendet: ${name}`);
+}
+
+/**
+ * Speisekarte "KGF April 26" (Rainer Wein).
+ * Bestehende Kategorien/Artikel werden sanft deaktiviert (is_active=0),
+ * so dass historische Bestellungen/Rechnungen weiterhin auflösbar bleiben,
+ * aber im UI nicht mehr auftauchen.
+ */
+function seedMenuKgfApril26(db: Database.Database): void {
+  db.exec('UPDATE menu_items SET is_active = 0, updated_at = datetime(\'now\')');
+  db.exec('UPDATE menu_categories SET is_active = 0, updated_at = datetime(\'now\')');
+
+  const categories: Array<[string, number, 'schank' | 'kueche']> = [
+    ['Weißwein & Rosé',     1, 'schank'],
+    ['Rotwein',             2, 'schank'],
+    ['Spezialwein & Rappa', 3, 'schank'],
+    ['Flasche',             4, 'schank'],
+    ['Keller',              5, 'schank'],
+    ['Alkoholfrei',         6, 'schank'],
+    ['Snacks',              7, 'schank'],
+    ['Brote',               8, 'kueche'],
+    ['Süßes',               9, 'kueche'],
+  ];
+  const insertCat = db.prepare('INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?)');
+  const catId: Record<string, number> = {};
+  for (const [name, sort, target] of categories) {
+    catId[name] = insertCat.run(name, sort, target).lastInsertRowid as number;
+  }
+
+  type Item = [cat: string, name: string, price: number, sort: number, mode: 'sofort' | 'lieferzeit'];
+  const items: Item[] = [
+    // Weißwein & Rosé (1/8)
+    ['Weißwein & Rosé', 'Weinviertel DAC 2025 Black Edition',   3.50, 1, 'sofort'],
+    ['Weißwein & Rosé', 'Weinviertel DAC 2025 Silver Edition',  4.00, 2, 'sofort'],
+    ['Weißwein & Rosé', 'Grüner Veltliner Qualitätswein 2025',  3.00, 3, 'sofort'],
+    ['Weißwein & Rosé', 'Welschriesling Qualitätswein 2025',    3.50, 4, 'sofort'],
+    ['Weißwein & Rosé', 'Zweigelt Rosé Qualitätswein 2025',     4.00, 5, 'sofort'],
+    ['Weißwein & Rosé', 'Weinviertel DAC 2024',                 3.50, 6, 'sofort'],
+    ['Weißwein & Rosé', 'Weinviertel DAC 2024 Reserve',         4.50, 7, 'sofort'],
+    ['Weißwein & Rosé', 'Grüner Veltliner 2024 halbtrocken',    3.00, 8, 'sofort'],
+    ['Weißwein & Rosé', 'Riesling 2022',                        3.50, 9, 'sofort'],
+
+    // Rotwein (1/8)
+    ['Rotwein', 'Merlot 2024',             4.00, 1, 'sofort'],
+    ['Rotwein', 'Blauburger 2024',         4.00, 2, 'sofort'],
+    ['Rotwein', 'Trilogie 2023 Barrique',  4.50, 3, 'sofort'],
+    ['Rotwein', 'Zweigelt 2022 Barrique',  4.50, 4, 'sofort'],
+
+    // Spezialwein & Rappa (1/8 bzw. 2cl)
+    ['Spezialwein & Rappa', 'PetNat 2023–2025',      5.00, 1, 'sofort'],
+    ['Spezialwein & Rappa', 'OrangeWein 2022',       4.00, 2, 'sofort'],
+    ['Spezialwein & Rappa', 'Rappa 2022–2024 2cl',   2.50, 3, 'sofort'],
+
+    // Flasche (Tisch-Preise)
+    ['Flasche', 'Weinviertel DAC 2025 Black Edition',  19.00,  1, 'sofort'],
+    ['Flasche', 'Weinviertel DAC 2025 Silver Edition', 22.00,  2, 'sofort'],
+    ['Flasche', 'Grüner Veltliner Qualitätswein 2025', 16.00,  3, 'sofort'],
+    ['Flasche', 'Welschriesling Qualitätswein 2025',   10.00,  4, 'sofort'],
+    ['Flasche', 'Zweigelt Rosé Qualitätswein 2025',    22.00,  5, 'sofort'],
+    ['Flasche', 'Weinviertel DAC 2024',                19.00,  6, 'sofort'],
+    ['Flasche', 'Weinviertel DAC 2024 Reserve',        25.00,  7, 'sofort'],
+    ['Flasche', 'Grüner Veltliner 2024 halbtrocken',   16.00,  8, 'sofort'],
+    ['Flasche', 'Riesling 2022',                       19.00,  9, 'sofort'],
+    ['Flasche', 'Merlot 2024',                         22.00, 10, 'sofort'],
+    ['Flasche', 'Blauburger 2024',                     22.00, 11, 'sofort'],
+    ['Flasche', 'Trilogie 2023 Barrique',              25.00, 12, 'sofort'],
+    ['Flasche', 'Zweigelt 2022 Barrique',              25.00, 13, 'sofort'],
+    ['Flasche', 'PetNat 2023–2025',                    28.00, 14, 'sofort'],
+    ['Flasche', 'OrangeWein 2022',                     22.00, 15, 'sofort'],
+    ['Flasche', 'Rappa 2022–2024 0,33l',               14.00, 16, 'sofort'],
+
+    // Keller (ab Keller 0,75l)
+    ['Keller', 'Weinviertel DAC 2025 Black Edition',   7.00,  1, 'sofort'],
+    ['Keller', 'Weinviertel DAC 2025 Silver Edition',  8.00,  2, 'sofort'],
+    ['Keller', 'Grüner Veltliner Qualitätswein 2025',  6.00,  3, 'sofort'],
+    ['Keller', 'Welschriesling Qualitätswein 2025',    7.00,  4, 'sofort'],
+    ['Keller', 'Zweigelt Rosé Qualitätswein 2025',     9.00,  5, 'sofort'],
+    ['Keller', 'Weinviertel DAC 2024',                 8.00,  6, 'sofort'],
+    ['Keller', 'Weinviertel DAC 2024 Reserve',        13.00,  7, 'sofort'],
+    ['Keller', 'Grüner Veltliner 2024 halbtrocken',    6.00,  8, 'sofort'],
+    ['Keller', 'Riesling 2022',                        7.00,  9, 'sofort'],
+    ['Keller', 'Merlot 2024',                          8.00, 10, 'sofort'],
+    ['Keller', 'Blauburger 2024',                      8.00, 11, 'sofort'],
+    ['Keller', 'Trilogie 2023 Barrique',               9.00, 12, 'sofort'],
+    ['Keller', 'Zweigelt 2022 Barrique',               9.00, 13, 'sofort'],
+    ['Keller', 'PetNat 2023–2025',                    11.00, 14, 'sofort'],
+    ['Keller', 'OrangeWein 2022',                      9.00, 15, 'sofort'],
+
+    // Alkoholfrei
+    ['Alkoholfrei', 'Gspritzter 1/4',             2.50,  1, 'sofort'],
+    ['Alkoholfrei', 'Gspritzter 1/2',             4.00,  2, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft Natur 1/4',      3.00,  3, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft Natur 1/2',      5.00,  4, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft Leitung 1/4',    3.00,  5, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft Leitung 1/2',    5.00,  6, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft gespritzt 1/4',  2.50,  7, 'sofort'],
+    ['Alkoholfrei', 'Traubensaft gespritzt 1/2',  4.00,  8, 'sofort'],
+    ['Alkoholfrei', 'Sodawasser 1/4',             1.50,  9, 'sofort'],
+    ['Alkoholfrei', 'Sodawasser 1,5l',            6.00, 10, 'sofort'],
+
+    // Snacks
+    ['Snacks', 'Popcorn klein', 2.00, 1, 'sofort'],
+    ['Snacks', 'Popcorn groß',  4.00, 2, 'sofort'],
+
+    // Brote (je € 4,50)
+    ['Brote', 'Brot Schinken',           4.50,  1, 'lieferzeit'],
+    ['Brote', 'Brot Speck',              4.50,  2, 'lieferzeit'],
+    ['Brote', 'Brot Thunfisch',          4.50,  3, 'lieferzeit'],
+    ['Brote', 'Brot Schweinsbratl',      4.50,  4, 'lieferzeit'],
+    ['Brote', 'Brot Kümmelbratl',        4.50,  5, 'lieferzeit'],
+    ['Brote', 'Brot Käse',               4.50,  6, 'lieferzeit'],
+    ['Brote', 'Brot Obatzen',            4.50,  7, 'lieferzeit'],
+    ['Brote', 'Brot Erdäpfelkas',        4.50,  8, 'lieferzeit'],
+    ['Brote', 'Brot Eieraufstrich',      4.50,  9, 'lieferzeit'],
+    ['Brote', 'Brot Veganer Aufstrich',  4.50, 10, 'lieferzeit'],
+
+    // Süßes (je € 3,50)
+    ['Süßes', 'Schaumrollen',          3.50, 1, 'lieferzeit'],
+    ['Süßes', 'Sachertorte',           3.50, 2, 'lieferzeit'],
+    ['Süßes', 'Cheesecake',            3.50, 3, 'lieferzeit'],
+    ['Süßes', 'Obstkuchen',            3.50, 4, 'lieferzeit'],
+    ['Süßes', 'Bisquitroulade',        3.50, 5, 'lieferzeit'],
+    ['Süßes', 'Veganer Apfelkuchen',   3.50, 6, 'lieferzeit'],
+    ['Süßes', 'Topfenstrudel',         3.50, 7, 'lieferzeit'],
+  ];
+
+  const insertItem = db.prepare(
+    'INSERT INTO menu_items (category_id, name, price, sort_order, availability_mode) VALUES (?, ?, ?, ?, ?)'
+  );
+  for (const [cat, name, price, sort, mode] of items) {
+    insertItem.run(catId[cat], name, price, sort, mode);
+  }
 }
 
 export async function seedDefaultData(): Promise<void> {
