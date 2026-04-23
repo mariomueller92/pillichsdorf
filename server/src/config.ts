@@ -1,14 +1,26 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+// Repo-Root = zwei Ebenen über server/src/ (stabil, unabhängig von CWD)
+const REPO_ROOT = path.resolve(__dirname, '../..');
+dotenv.config({ path: path.resolve(REPO_ROOT, '.env') });
+
+// DB-Pfad CWD-unabhängig auflösen:
+// Relative Pfade werden IMMER gegen den Repo-Root aufgelöst,
+// damit die DB unabhängig davon, ob der Server aus /, /server oder
+// sonstwo gestartet wird, immer am gleichen Ort liegt.
+function resolveDbPath(): string {
+  const raw = process.env.DB_PATH;
+  if (!raw) return path.resolve(REPO_ROOT, 'server/data/pillichsdorf.db');
+  return path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
+}
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
   jwtSecret: process.env.JWT_SECRET || 'change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
-  dbPath: process.env.DB_PATH || path.resolve(__dirname, '../data/pillichsdorf.db'),
+  dbPath: resolveDbPath(),
   printer: {
     enabled: process.env.PRINTER_ENABLED === 'true',
     name: process.env.PRINTER_NAME || 'Knub Thermica',

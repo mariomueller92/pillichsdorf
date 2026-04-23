@@ -25,7 +25,9 @@
       "Bash(cat /tmp/server.log)",
       "Bash(curl -s http://127.0.0.1:3000/api/health)",
       "Bash(curl -s -X POST http://127.0.0.1:3000/api/auth/login-pin -H 'Content-Type: application/json' -d '{\"pin\":\"9999\"}')",
-      "Bash(curl -s -X PATCH http://127.0.0.1:3000/api/menu/items/1/mode -H \"Authorization: Bearer $\\(curl -s -X POST http://127.0.0.1:3000/api/auth/login-pin -H 'Content-Type: application/json' -d '{\"pin\":\"9999\"}')"
+      "Bash(curl -s -X PATCH http://127.0.0.1:3000/api/menu/items/1/mode -H \"Authorization: Bearer $\\(curl -s -X POST http://127.0.0.1:3000/api/auth/login-pin -H 'Content-Type: application/json' -d '{\"pin\":\"9999\"}')",
+      "PowerShell(netstat *)",
+      "PowerShell(netsh interface *)"
     ]
   }
 }

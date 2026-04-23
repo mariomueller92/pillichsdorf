@@ -120,9 +120,10 @@ export function TableDetail() {
   if (loading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
   if (!tableData) return <div className="p-4">Tisch nicht gefunden</div>;
 
-  // Abrechnen ausgrauen wenn Tisch leer oder keine offenen Positionen
+  // Abrechnen ausgrauen wenn Tisch leer bzw. keine (noch nicht abgerechneten) Positionen
+  // "serviert" zählt weiterhin als abzurechnen — es bedeutet nur "geliefert", nicht "bezahlt".
   const canSettle = tableData.status !== 'frei' && (tableData.orders ?? []).some((o: any) =>
-    (o.items ?? []).some((i: any) => i.status !== 'storniert' && i.status !== 'serviert')
+    (o.items ?? []).some((i: any) => i.status !== 'storniert')
   );
 
   const freeTables = tables.filter(t => t.status === 'frei' && t.id !== parseInt(id!) && !t.merged_into_id);

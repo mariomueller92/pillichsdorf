@@ -19,7 +19,50 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/**
+ * Erzeugt einen Snapshot der DB vor jeder Migration.
+ * Backup landet in <dbDir>/backups/pillichsdorf-<ISO-Zeitstempel>.db.
+ * Beibehalten: letzte 20 Backups, ältere werden gelöscht.
+ *
+ * Wichtig: Das online-Backup-API von better-sqlite3 liest die DB inklusive
+ * aktuellem WAL, d.h. auch nicht-checkpointete Writes werden korrekt gesichert.
+ */
+function backupBeforeMigration(): void {
+  if (!fs.existsSync(config.dbPath)) return; // Erster Start – nichts zu sichern
+
+  const dbDir = path.dirname(config.dbPath);
+  const backupDir = path.join(dbDir, 'backups');
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = path.join(backupDir, `pillichsdorf-${stamp}.db`);
+
+  try {
+    const source = new Database(config.dbPath, { readonly: true });
+    // Synchrones Backup via VACUUM INTO — inkludiert WAL-Inhalt
+    source.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    source.close();
+    console.log(`[DB] Backup erstellt: ${target}`);
+  } catch (err) {
+    console.error('[DB] Backup fehlgeschlagen:', err);
+  }
+
+  // Aufräumen: nur 20 jüngste Backups behalten
+  try {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('pillichsdorf-') && f.endsWith('.db'))
+      .map(f => ({ name: f, path: path.join(backupDir, f), mtime: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const old of files.slice(20)) {
+      fs.unlinkSync(old.path);
+    }
+  } catch { /* ignore cleanup errors */ }
+}
+
 export function runMigrations(): void {
+  // Immer zuerst Snapshot ziehen — so gehen bei keiner Schema-Änderung Daten verloren.
+  backupBeforeMigration();
+
   const database = getDb();
 
   database.exec(`
@@ -129,7 +172,29 @@ export function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
   `);
 
-  // Inkrementelle Migrationen fuer bestehende DBs
+  // ----------------------------------------------------------------
+  // INKREMENTELLE MIGRATIONEN für bestehende (produktive) DBs
+  // ----------------------------------------------------------------
+  //
+  // WICHTIG für zukünftige Schema-Änderungen: Die produktive DB darf
+  // NIEMALS gelöscht oder neu erstellt werden. Stattdessen:
+  //
+  //   1. Tabelle existiert schon? → CREATE TABLE IF NOT EXISTS (oben).
+  //   2. Neue Spalte? → mit PRAGMA table_info() prüfen, dann ALTER TABLE ADD COLUMN.
+  //   3. Spaltentyp ändern / Spalte entfernen? → neuer Pattern:
+  //        a) CREATE TABLE <name>_new mit neuem Schema
+  //        b) INSERT INTO <name>_new SELECT ... FROM <name> (Daten migrieren!)
+  //        c) DROP TABLE <name>
+  //        d) ALTER TABLE <name>_new RENAME TO <name>
+  //      Alles in einer Transaktion. Vor jeder Ausführung prüfen, ob die
+  //      Änderung schon angewendet wurde (idempotent machen).
+  //   4. Neue Tabelle? → CREATE TABLE IF NOT EXISTS oben ergänzen.
+  //   5. NIEMALS TRUNCATE / DELETE FROM / DROP ohne Daten-Migration.
+  //
+  // Ein automatisches Backup wird VOR jeder Migration in
+  // <dbDir>/backups/ angelegt — siehe backupBeforeMigration().
+  // ----------------------------------------------------------------
+
   const tableCols = database.prepare("PRAGMA table_info(tables)").all() as { name: string }[];
   if (!tableCols.some(c => c.name === 'sort_order')) {
     database.exec("ALTER TABLE tables ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");

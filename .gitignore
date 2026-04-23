@@ -1,9 +1,29 @@
 node_modules/
 dist/
 .env
-*.db
-server/data/
+.env.local
+.env.*.local
+
+# SQLite Datenbank-Dateien - NIEMALS committen oder via git pull überschreiben
+# (Patterns ohne führenden Slash matchen in jedem Verzeichnis)
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.db-journal
+**/*.sqlite
+**/*.sqlite3
+
+# Daten-Ordner - in jedem Verzeichnis ignorieren (egal ob server/data/ oder server/server/data/)
+**/data/
+!**/data/.gitkeep
+
+# Backups (werden vom Server vor Migrationen automatisch angelegt)
+*.bak
+*.backup
+**/backups/
+
 client/dist/
+**/tsconfig.tsbuildinfo
 .DS_Store
 Thumbs.db
 *.log
