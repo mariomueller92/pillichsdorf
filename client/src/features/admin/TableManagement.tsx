@@ -80,7 +80,7 @@ export function TableManagement() {
             <div>
               <div className="font-medium">Tisch {table.table_number}</div>
               <div className="text-sm text-slate-500">
-                {table.capacity ? `${table.capacity} Plaetze` : 'Keine Angabe'}
+                {table.capacity ? `${table.capacity} Plätze` : 'Keine Angabe'}
                 <span className="ml-2 text-xs text-slate-400">Sortierung: {table.sort_order ?? 0}</span>
               </div>
             </div>
@@ -108,14 +108,14 @@ export function TableManagement() {
             placeholder="z.B. 1, Terrasse 3"
           />
           <Input
-            label="Anzahl Plaetze (optional)"
+            label="Anzahl Plätze (optional)"
             type="number"
             min="1"
             value={form.capacity}
             onChange={e => setForm({ ...form, capacity: e.target.value })}
           />
           <Input
-            label="Sortierung (kleinere Zahl = frueher)"
+            label="Sortierung (kleinere Zahl = früher)"
             type="number"
             value={form.sort_order}
             onChange={e => setForm({ ...form, sort_order: e.target.value })}

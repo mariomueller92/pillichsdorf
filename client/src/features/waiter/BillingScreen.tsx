@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as billingApi from '@/api/billing.api';
+import * as tablesApi from '@/api/tables.api';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
-import { ArrowLeft, Percent, Euro, AlertTriangle, Printer } from 'lucide-react';
+import { ArrowLeft, Percent, Euro, AlertTriangle, Printer, Split } from 'lucide-react';
 
 const DELIVERED_STATUS = 'serviert';
 const statusLabel: Record<string, string> = {
-  neu: 'noch nicht bestaetigt',
+  neu: 'noch nicht bestätigt',
   in_zubereitung: 'in Zubereitung',
   fertig: 'fertig, aber nicht serviert',
 };
@@ -23,6 +24,8 @@ export function BillingScreen() {
   const [settling, setSettling] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [splitting, setSplitting] = useState(false);
+  const [splitMode, setSplitMode] = useState(false);
+  const [showFreePrompt, setShowFreePrompt] = useState(false);
 
   const reload = async () => {
     if (!tischId) return;
@@ -61,6 +64,7 @@ export function BillingScreen() {
   };
 
   const undeliveredItems = summary?.items.filter((i: any) => i.status !== DELIVERED_STATUS) ?? [];
+  const hasItems = summary && summary.items.length > 0;
 
   const handleSettle = async () => {
     if (!tischId || !summary) return;
@@ -80,14 +84,33 @@ export function BillingScreen() {
       await billingApi.settleTable(parseInt(tischId), {
         discount_type: discountType,
         discount_value: discountValue,
+        print_bon: true,
       });
       toast.success('Tisch abgerechnet!');
-      navigate('/tische');
+      // Popup: Tisch freigeben oder besetzt lassen?
+      setShowFreePrompt(true);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Fehler bei Abrechnung');
     } finally {
       setSettling(false);
     }
+  };
+
+  const handleFreeTable = async () => {
+    if (!tischId) return;
+    try {
+      await tablesApi.releaseTable(parseInt(tischId));
+      toast.success('Tisch freigegeben');
+      navigate('/tische');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Fehler beim Freigeben');
+    }
+  };
+
+  const handleKeepTable = () => {
+    setShowFreePrompt(false);
+    // In Tisch-Ansicht bleiben
+    if (tischId) navigate(`/tisch/${tischId}`);
   };
 
   const handleSplit = async () => {
@@ -105,7 +128,7 @@ export function BillingScreen() {
       const next = await reload();
       if (next && next.items.length === 0) {
         toast.success('Alle Positionen abgerechnet');
-        navigate('/tische');
+        setShowFreePrompt(true);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Fehler bei Teilrechnung');
@@ -124,6 +147,26 @@ export function BillingScreen() {
         <h1 className="text-xl font-bold">Abrechnung - Tisch {tischId}</h1>
       </div>
 
+      {/* Free-Table Popup */}
+      {showFreePrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+            <h2 className="text-lg font-bold mb-2">Rechnung bezahlt</h2>
+            <p className="text-slate-600 mb-4">
+              Alle Positionen sind abgerechnet. Tisch freigeben oder besetzt lassen?
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button variant="success" size="lg" className="w-full" onClick={handleFreeTable}>
+                Tisch freigeben
+              </Button>
+              <Button variant="ghost" size="lg" className="w-full" onClick={handleKeepTable}>
+                Besetzt lassen
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Warning: undelivered items */}
       {undeliveredItems.length > 0 && (
         <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-3 mb-4 flex gap-2">
@@ -132,7 +175,7 @@ export function BillingScreen() {
             <div className="font-semibold">
               {undeliveredItems.length} Position(en) noch nicht serviert
             </div>
-            <div>Beim Abrechnen muss der Mitarbeiter das explizit bestaetigen.</div>
+            <div>Beim Abrechnen muss der Mitarbeiter das explizit bestätigen.</div>
           </div>
         </div>
       )}
@@ -140,8 +183,10 @@ export function BillingScreen() {
       {/* Items */}
       <div className="bg-white rounded-xl border border-slate-200 mb-4">
         <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500">
-          <span>Zum Splitten Positionen anhaken</span>
-          {selected.size > 0 && (
+          <span>
+            {splitMode ? 'Positionen für Teilrechnung anhaken' : `${summary.items.length} Position(en)`}
+          </span>
+          {splitMode && selected.size > 0 && (
             <button
               onClick={() => setSelected(new Set())}
               className="text-primary font-medium"
@@ -156,15 +201,17 @@ export function BillingScreen() {
           return (
             <label
               key={item.id}
-              className={`flex justify-between items-center px-4 py-2.5 border-b border-slate-100 last:border-b-0 cursor-pointer ${isSelected ? 'bg-primary/5' : undelivered ? 'bg-amber-50/50' : ''}`}
+              className={`flex justify-between items-center px-4 py-2.5 border-b border-slate-100 last:border-b-0 ${splitMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-primary/5' : undelivered ? 'bg-amber-50/50' : ''}`}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => toggleSelect(item.id)}
-                  className="w-5 h-5 accent-primary shrink-0"
-                />
+                {splitMode && (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(item.id)}
+                    className="w-5 h-5 accent-primary shrink-0"
+                  />
+                )}
                 <div className="min-w-0">
                   <span className="font-medium text-sm">{item.quantity}x {item.item_name}</span>
                   {undelivered && (
@@ -183,8 +230,21 @@ export function BillingScreen() {
         })}
       </div>
 
-      {/* Split action */}
-      {selected.size > 0 && (
+      {/* Split toggle */}
+      {hasItems && !splitMode && (
+        <Button
+          variant="ghost"
+          size="md"
+          className="w-full mb-4"
+          onClick={() => setSplitMode(true)}
+        >
+          <span className="flex items-center justify-center gap-2">
+            <Split size={16} /> Rechnung splitten
+          </span>
+        </Button>
+      )}
+
+      {splitMode && (
         <div className="bg-primary/5 border border-primary/30 rounded-xl p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -198,18 +258,28 @@ export function BillingScreen() {
               <div className="font-bold">{selectedSubtotal.toFixed(2).replace('.', ',')} &euro;</div>
             </div>
           </div>
-          <Button
-            onClick={handleSplit}
-            disabled={splitting}
-            size="md"
-            variant="primary"
-            className="w-full"
-          >
-            <span className="flex items-center justify-center gap-2">
-              <Printer size={16} />
-              {splitting ? 'Wird gedruckt...' : 'Teilrechnung drucken'}
-            </span>
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="md"
+              className="flex-1"
+              onClick={() => { setSplitMode(false); setSelected(new Set()); }}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleSplit}
+              disabled={splitting || selected.size === 0}
+              size="md"
+              variant="primary"
+              className="flex-1"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <Printer size={16} />
+                {splitting ? 'Wird gedruckt...' : 'Teilrechnung drucken'}
+              </span>
+            </Button>
+          </div>
         </div>
       )}
 
@@ -262,8 +332,14 @@ export function BillingScreen() {
         </span>
       </div>
 
-      <Button onClick={handleSettle} disabled={settling || summary.items.length === 0} size="lg" variant="success" className="w-full">
-        {settling ? 'Abrechnen...' : 'Bezahlt - Abschliessen'}
+      <Button
+        onClick={handleSettle}
+        disabled={settling || !hasItems || splitMode}
+        size="lg"
+        variant="success"
+        className="w-full"
+      >
+        {settling ? 'Abrechnen...' : hasItems ? 'Gesamt - Bezahlt & Drucken' : 'Keine offenen Posten'}
       </Button>
     </div>
   );

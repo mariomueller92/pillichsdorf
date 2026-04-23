@@ -1,4 +1,5 @@
 import { buildReceipt, printRaw, isPrinterEnabled } from './index.js';
+import { config } from '../config.js';
 
 interface UnifiedBonItem {
   quantity: number;
@@ -15,6 +16,7 @@ interface UnifiedBonData {
   items: UnifiedBonItem[];
   notes?: string | null;
   createdAt: string;
+  splitPart?: { index: number; total: number } | null;
 }
 
 interface BillBonData {
@@ -26,91 +28,98 @@ interface BillBonData {
   discountType?: string | null;
   discountValue?: number;
   total: number;
+  splitPart?: { index: number; total: number } | null;
 }
+
+const CUT_MARK_LINE = '- - - - - - - - - - - - - - - -';
 
 /**
  * Unified Order Bon:
  * - Top: SOFORT items (for bar/tray assembly)
- * - 15 blank lines (tear zone)
+ * - Tear zone with visible cut marks
  * - Bottom: KUECHE items with EXTRA LARGE table number
- * - If no kitchen items: no tear zone, just sofort section
  */
 export function printUnifiedBon(data: UnifiedBonData): boolean {
   if (!isPrinterEnabled()) return false;
 
   const time = new Date(data.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-  const date = new Date(data.createdAt).toLocaleDateString('de-DE');
-  const tischLabel = data.tableNumber ? `Tisch ${data.tableNumber}` : (data.barSlot || 'BAR');
+  const isBar = !data.tableNumber;
+  const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
+  const splitSuffix = data.splitPart ? ` (Teil ${data.splitPart.index}/${data.splitPart.total})` : '';
 
   const sofortItems = data.items.filter(i => i.availability_mode === 'sofort');
   const kuecheItems = data.items.filter(i => i.availability_mode === 'lieferzeit');
 
   const r = buildReceipt();
 
-  const printHeader = () => {
+  const printBigTableHeader = () => {
+    // Barverkauf bzw. Kein-Tisch: prominent an den Kopf
+    if (isBar) {
+      r.center().bold(true).huge(true)
+        .line('BARVERKAUF')
+        .huge(false).bold(false).left();
+      if (data.barSlot) {
+        r.center().bold(true).big(true).line(data.barSlot).big(false).bold(false).left();
+      }
+    } else {
+      // Tischnummer sehr gross
+      r.center().bold(true).quad(true)
+        .line(`T ${data.tableNumber}`)
+        .quad(false).bold(false).left();
+    }
+  };
+
+  const printHeader = (section: string) => {
     r.center().bold(true)
       .separator('=')
-      .line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}`)
-      .line(`${tischLabel} / ${time}`)
-      .line(`Kellner: ${data.waiterName}`)
-      .separator('=');
+      .line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}${splitSuffix}`)
+      .line(`${tischLabel}  ${time}`)
+      .line(`Kellner: ${data.waiterName}`);
+    r.big(true).line(section).big(false);
+    r.separator('=').left().bold(false);
   };
 
-  const printBigTable = () => {
-    r.center().bold(true).big(true)
-      .line(`*** ${tischLabel} ***`)
-      .big(false).bold(false).left();
-  };
-
-  // === SOFORT section (always printed) ===
-  printHeader();
-  r.left().bold(true).line('--- SOFORT (Theke) ---').bold(false);
-  r.feed(1);
-  printBigTable();
-  r.feed(1);
-
-  if (sofortItems.length === 0) {
-    r.line('  (keine)');
-  } else {
-    for (const item of sofortItems) {
-      r.bold(true).line(`${item.quantity}x ${item.item_name}`);
+  const printItems = (items: UnifiedBonItem[]) => {
+    if (items.length === 0) {
+      r.line('  (keine)');
+      return;
+    }
+    for (const item of items) {
+      // grössere Schrift für Positionen
+      r.bold(true).big(true).line(`${item.quantity}x ${item.item_name}`).big(false).bold(false);
       if (item.notes) {
-        r.bold(false).line(`   -> ${item.notes}`);
+        r.line(`   -> ${item.notes}`);
       }
     }
-  }
-  r.bold(false);
+  };
+
+  // === SOFORT section ===
+  printHeader('--- SOFORT (Theke) ---');
+  printBigTableHeader();
+  r.feed(1);
+  printItems(sofortItems);
 
   if (data.notes) {
-    r.separator('-').line(`NOTIZ: ${data.notes}`);
+    r.separator('-').bold(true).line(`NOTIZ: ${data.notes}`).bold(false);
   }
 
-  // strichlierte Trennlinie zwischen Schank und Kueche
-  r.line('- '.repeat(Math.floor(32 / 2)));
-
-  // === KUECHE section (only if kitchen items exist) ===
+  // === KUECHE section ===
   if (kuecheItems.length > 0) {
-    // 15 blank lines as tear zone
-    r.feed(15);
+    // Abrisskante: sichtbar markiert, mehrere Leerzeilen, dann Markierung nochmal
+    r.feed(2);
+    r.center().line(CUT_MARK_LINE).line('>>>>  ABRISS  <<<<').line(CUT_MARK_LINE).left();
+    r.feed(6);
+    r.center().line(CUT_MARK_LINE).line('>>>>  ABRISS  <<<<').line(CUT_MARK_LINE).left();
+    r.feed(2);
 
-    printHeader();
-    r.left().bold(true).line('--- KUECHE ---').bold(false);
+    printHeader('--- KUECHE ---');
+    printBigTableHeader();
     r.feed(1);
-    printBigTable();
-    r.feed(1);
-
-    for (const item of kuecheItems) {
-      r.bold(true).line(`${item.quantity}x ${item.item_name}`);
-      if (item.notes) {
-        r.bold(false).line(`   -> ${item.notes}`);
-      }
-    }
-    r.bold(false);
+    printItems(kuecheItems);
 
     if (data.notes) {
-      r.separator('-').line(`NOTIZ: ${data.notes}`);
+      r.separator('-').bold(true).line(`NOTIZ: ${data.notes}`).bold(false);
     }
-
     r.separator('=');
   }
 
@@ -128,22 +137,39 @@ export function printBillBon(data: BillBonData): boolean {
   if (!isPrinterEnabled()) return false;
 
   const now = new Date();
-  const tischLabel = data.tableNumber ? `Tisch ${data.tableNumber}` : (data.barSlot || 'BAR');
+  const isBar = !data.tableNumber;
+  const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
+  const splitSuffix = data.splitPart ? `  (Teil ${data.splitPart.index}/${data.splitPart.total})` : '';
   const r = buildReceipt();
 
-  r.center().bold(true)
-    .separator('=')
-    .line('RAINER WEIN')
-    .separator('=')
-    .left().bold(false)
-    .line(tischLabel)
-    .line(`${now.toLocaleDateString('de-DE')}  ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`)
+  // Company header
+  r.center().bold(true).big(true)
+    .line(config.company.name)
+    .big(false);
+  if (config.company.address1) r.line(config.company.address1);
+  if (config.company.address2) r.line(config.company.address2);
+  if (config.company.betriebsnummer) r.line(`Betriebs-Nr.: ${config.company.betriebsnummer}`);
+  r.bold(false).separator('=');
+
+  // Barverkauf oder Tisch - gross oben
+  if (isBar) {
+    r.center().bold(true).huge(true).line('BARVERKAUF').huge(false).bold(false).left();
+    if (data.barSlot) {
+      r.center().big(true).line(data.barSlot).big(false).left();
+    }
+  } else {
+    r.center().bold(true).quad(true).line(`T ${data.tableNumber}`).quad(false).bold(false).left();
+  }
+
+  r.left()
+    .line(`${now.toLocaleDateString('de-DE')}  ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${splitSuffix}`)
     .line(`Kellner: ${data.waiterName}`)
     .separator();
 
   for (const item of data.items) {
     const total = (item.unit_price * item.quantity).toFixed(2);
-    r.row(`${item.quantity}x ${item.item_name}`, total);
+    // grössere Schrift
+    r.big(true).row(`${item.quantity}x ${item.item_name}`, total).big(false);
   }
 
   r.separator()
@@ -160,12 +186,18 @@ export function printBillBon(data: BillBonData): boolean {
   }
 
   r.separator('=')
-    .bold(true).big(true)
+    .bold(true).huge(true)
     .row('GESAMT:', `${data.total.toFixed(2)} EUR`)
-    .bold(false).big(false)
+    .huge(false).bold(false)
     .separator('=')
-    .center().line('Vielen Dank!')
-    .feed(2).cut();
+    .center().line(config.company.footer)
+    .feed(1)
+    .line('Powered by (c) MMUELLER')
+    .feed(1);
+
+  // Abrisskante am Ende
+  r.center().line(CUT_MARK_LINE).line('>>>>  ABRISS  <<<<').line(CUT_MARK_LINE).left();
+  r.feed(2).cut();
 
   const ok = printRaw(r.toString());
   if (ok) console.log('[Drucker] Abrechnungs-Bon gedruckt');

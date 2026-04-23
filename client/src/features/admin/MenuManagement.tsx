@@ -130,7 +130,7 @@ export function MenuManagement() {
                   {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   <span className="font-medium">{cat.name}</span>
                   <Badge variant={cat.target === 'kueche' ? 'warning' : 'info'}>
-                    {cat.target === 'kueche' ? 'Kueche' : 'Schank'}
+                    {cat.target === 'kueche' ? 'Küche' : 'Schank'}
                   </Badge>
                   <span className="text-xs text-slate-400">{catItems.length} Artikel</span>
                 </div>
@@ -153,7 +153,7 @@ export function MenuManagement() {
                           onClick={() => toggleAvail(item.id)}
                           className={`text-xs px-2 py-0.5 rounded ${item.is_available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
                         >
-                          {item.is_available ? 'Verfuegbar' : 'Ausverkauft'}
+                          {item.is_available ? 'Verfügbar' : 'Ausverkauft'}
                         </button>
                         <button onClick={() => openEditItem(item)} className="p-1.5 hover:bg-slate-100 rounded"><Pencil size={14} /></button>
                         <button onClick={() => deleteItem(item.id)} className="p-1.5 hover:bg-red-50 rounded text-danger"><Trash2 size={14} /></button>
@@ -161,7 +161,7 @@ export function MenuManagement() {
                     </div>
                   ))}
                   <Button onClick={() => openCreateItem(cat.id)} variant="ghost" size="sm" className="mt-2 w-full">
-                    <span className="flex items-center gap-1"><Plus size={14} /> Artikel hinzufuegen</span>
+                    <span className="flex items-center gap-1"><Plus size={14} /> Artikel hinzufügen</span>
                   </Button>
                 </div>
               )}
@@ -182,7 +182,7 @@ export function MenuManagement() {
               onChange={e => setCatForm({ ...catForm, target: e.target.value as CategoryTarget })}
               className="rounded-lg border border-slate-300 px-3 py-2.5"
             >
-              <option value="kueche">Kueche</option>
+              <option value="kueche">Küche</option>
               <option value="schank">Schank</option>
             </select>
           </div>

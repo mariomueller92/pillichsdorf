@@ -32,6 +32,8 @@ const statusConfig: Record<string, { label: string; variant: 'warning' | 'info' 
   offen: { label: 'Offen', variant: 'warning', icon: Clock },
   in_bearbeitung: { label: 'In Arbeit', variant: 'info', icon: ChefHat },
   fertig: { label: 'Abholbereit', variant: 'success', icon: CheckCircle },
+  serviert: { label: 'Abgeschlossen', variant: 'neutral', icon: CheckCircle },
+  storniert: { label: 'Storniert', variant: 'danger', icon: AlertCircle },
 };
 
 const itemStatusBadge: Record<string, { label: string; variant: 'warning' | 'info' | 'success' | 'danger' | 'neutral' }> = {
@@ -49,15 +51,27 @@ export function MyOrders() {
   const fetchOrders = useCallback(async () => {
     if (!user) return;
     try {
-      const all = await ordersApi.getOrders({ status: 'offen' });
-      const inProgress = await ordersApi.getOrders({ status: 'in_bearbeitung' });
-      const ready = await ordersApi.getOrders({ status: 'fertig' });
-      const combined = [...all, ...inProgress, ...ready]
-        .filter(o => o.waiter_id === user.id)
+      // Alle Bestellungen ALLER User: offene + abgeschlossene
+      const [offen, inProgress, ready, serviert] = await Promise.all([
+        ordersApi.getOrders({ status: 'offen' }),
+        ordersApi.getOrders({ status: 'in_bearbeitung' }),
+        ordersApi.getOrders({ status: 'fertig' }),
+        ordersApi.getOrders({ status: 'serviert' }),
+      ]);
+
+      const isOpen = (s: string) => s === 'offen' || s === 'in_bearbeitung' || s === 'fertig';
+      const combined = [...offen, ...inProgress, ...ready, ...serviert];
+
+      // Offene nach oben (älteste zuerst, damit die länger wartenden oben stehen),
+      // abgeschlossene darunter absteigend (neueste zuerst).
+      const open = combined.filter(o => isOpen(o.status))
+        .sort((a, b) => parseDbTime(a.created_at).getTime() - parseDbTime(b.created_at).getTime());
+      const done = combined.filter(o => !isOpen(o.status))
         .sort((a, b) => parseDbTime(b.created_at).getTime() - parseDbTime(a.created_at).getTime());
+      const sorted = [...open, ...done];
 
       const detailed = await Promise.all(
-        combined.map(o => ordersApi.getOrder(o.id))
+        sorted.map(o => ordersApi.getOrder(o.id))
       );
       setOrders(detailed as OrderWithItems[]);
     } catch {
@@ -124,8 +138,10 @@ export function MyOrders() {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold">Meine Bestellungen</h1>
-        <Badge variant="info">{orders.length} offen</Badge>
+        <h1 className="text-xl font-bold">Bestellungen</h1>
+        <Badge variant="info">
+          {orders.filter(o => o.status === 'offen' || o.status === 'in_bearbeitung' || o.status === 'fertig').length} offen
+        </Badge>
       </div>
 
       {orders.length === 0 && (
@@ -162,6 +178,7 @@ export function MyOrders() {
                     {order.table_number ? `Tisch ${order.table_number}` : 'Bar'}
                   </span>
                   <span className="text-xs text-slate-400">#{order.id}</span>
+                  <span className="text-xs text-slate-500">· {order.waiter_name}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{timeAgo(order.created_at)}</span>

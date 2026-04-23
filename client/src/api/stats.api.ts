@@ -44,3 +44,8 @@ export async function getStats(from?: Date | null, to?: Date | null, limit: numb
   const { data } = await api.get<StatsBundle>('/stats', { params });
   return data;
 }
+
+export async function resetStats(): Promise<{ ok: boolean; bills: number; orders: number }> {
+  const { data } = await api.post('/stats/reset', { confirm: 'RESET' });
+  return data;
+}

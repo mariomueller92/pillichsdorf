@@ -36,7 +36,7 @@ export function OrderScreen() {
   const handleAddItem = (item: MenuItem) => {
     const cat = categories.find(c => c.id === item.category_id);
     addToCart(item, cat?.target || 'kueche');
-    toast.success(`${item.name} hinzugefuegt`);
+    toast.success(`${item.name} hinzugefügt`);
   };
 
   const handleSubmit = async () => {

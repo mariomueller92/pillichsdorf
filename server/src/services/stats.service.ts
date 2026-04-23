@@ -117,6 +117,24 @@ export function getOrdersByCategory(r: Range) {
   `).all(...o.params);
 }
 
+/**
+ * Löscht alle historischen Auftrags- & Abrechnungsdaten.
+ * Setzt auch alle Tische auf "frei" und beendet laufende Bar-Slots.
+ * Menü, Benutzer und Tische (Stammdaten) bleiben erhalten.
+ */
+export function resetAll() {
+  const db = getDb();
+  const result = db.transaction(() => {
+    const billItems = db.prepare('DELETE FROM bill_items').run().changes;
+    const bills = db.prepare('DELETE FROM bills').run().changes;
+    const orderItems = db.prepare('DELETE FROM order_items').run().changes;
+    const orders = db.prepare('DELETE FROM orders').run().changes;
+    db.prepare("UPDATE tables SET status = 'frei', merged_into_id = NULL, updated_at = datetime('now')").run();
+    return { bills, bill_items: billItems, orders, order_items: orderItems };
+  })();
+  return result;
+}
+
 export function getStatsBundle(r: Range, topLimit: number = 10) {
   return {
     summary: getSummary(r),

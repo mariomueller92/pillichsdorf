@@ -1,5 +1,5 @@
 import { OrderQueueView } from './OrderQueueView';
 
 export function KitchenView() {
-  return <OrderQueueView target="kueche" title="Kueche" />;
+  return <OrderQueueView target="kueche" title="Küche" />;
 }

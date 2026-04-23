@@ -23,7 +23,7 @@ export function BottomNav() {
             </NavLink>
             <NavLink to="/meine-bestellungen" className={linkClass}>
               <ClipboardList size={20} />
-              <span>Offen</span>
+              <span>Bestellungen</span>
             </NavLink>
             <NavLink to="/bar" className={linkClass}>
               <Beer size={20} />
@@ -44,7 +44,7 @@ export function BottomNav() {
             </NavLink>
           </>
         )}
-        {/* Admin sieht zusaetzlich: Verwaltung (Sammelseite) */}
+        {/* Admin sieht zusätzlich: Verwaltung (Sammelseite) */}
         {user.role === 'admin' && (
           <NavLink to="/admin/speisekarte" className={linkClass}>
             <Settings size={20} />

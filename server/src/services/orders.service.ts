@@ -52,6 +52,7 @@ export function createOrder(data: {
   waiter_id: number;
   notes?: string | null;
   items: Array<{ menu_item_id: number; quantity: number; notes?: string | null }>;
+  print_order_bon?: boolean;
 }) {
   const db = getDb();
 
@@ -115,20 +116,25 @@ export function createOrder(data: {
   });
 
   // Print unified bon (sofort items on top, kueche items on bottom with tear zone)
-  printUnifiedBon({
-    orderId: order.id,
-    tableNumber: order.table_number,
-    barSlot: order.bar_slot,
-    waiterName: order.waiter_name,
-    items: order.items.map((i: any) => ({
-      quantity: i.quantity,
-      item_name: i.item_name,
-      notes: i.notes,
-      availability_mode: i.availability_mode || 'sofort',
-    })),
-    notes: order.notes,
-    createdAt: order.created_at,
-  });
+  // Barverkauf-Direktausgabe (z.B. Popcorn): Client kann print_order_bon=false setzen,
+  // dann wird kein Bestellschein gedruckt.
+  const shouldPrintOrder = data.print_order_bon !== false;
+  if (shouldPrintOrder) {
+    printUnifiedBon({
+      orderId: order.id,
+      tableNumber: order.table_number,
+      barSlot: order.bar_slot,
+      waiterName: order.waiter_name,
+      items: order.items.map((i: any) => ({
+        quantity: i.quantity,
+        item_name: i.item_name,
+        notes: i.notes,
+        availability_mode: i.availability_mode || 'sofort',
+      })),
+      notes: order.notes,
+      createdAt: order.created_at,
+    });
+  }
 
   if (data.table_id) {
     socketService.emitTableStatusChanged({

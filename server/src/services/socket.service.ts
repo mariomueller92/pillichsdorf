@@ -35,3 +35,7 @@ export function emitProductAvailabilityChanged(data: any): void {
 export function emitOrderMovedToTable(data: any): void {
   getIo().emit('order:moved_to_table', data);
 }
+
+export function emitPrinterError(message: string): void {
+  getIo().emit('printer:error', { message, at: new Date().toISOString() });
+}

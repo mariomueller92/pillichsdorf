@@ -206,7 +206,7 @@ export function ZentralDashboard() {
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500" /> &gt;10 Min / Rechnung</span>
           </div>
 
-          {/* Bestellungen des ausgewaehlten Tisches */}
+          {/* Bestellungen des ausgewählten Tisches */}
           {selectedTableId != null && (
             <div className="mt-4">
               <div className="flex items-center justify-between mb-2">
@@ -297,7 +297,7 @@ export function ZentralDashboard() {
 
           {sortedPending.length === 0 && (
             <div className="text-slate-400 text-center py-8">
-              Keine offenen Kuechen-Bestellungen
+              Keine offenen Küchen-Bestellungen
             </div>
           )}
 
@@ -336,7 +336,7 @@ export function ZentralDashboard() {
             Top-Seller
           </h2>
           {topItems.length === 0 ? (
-            <div className="text-slate-400 text-sm py-4">Noch keine Verkaeufe</div>
+            <div className="text-slate-400 text-sm py-4">Noch keine Verkäufe</div>
           ) : (
             <div className="space-y-1 max-h-[35vh] overflow-y-auto">
               {topItems.map((ti, idx) => {

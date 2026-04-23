@@ -262,7 +262,7 @@ export function getOrderSummary(orderId: number) {
 export function settleOrder(
   orderId: number,
   waiterId: number,
-  data: { discount_type?: string | null; discount_value?: number; notes?: string | null }
+  data: { discount_type?: string | null; discount_value?: number; notes?: string | null; print_bon?: boolean }
 ) {
   const db = getDb();
   const summary = getOrderSummary(orderId);
@@ -294,19 +294,21 @@ export function settleOrder(
 
   socketService.emitBillSettled({ billId, orderId, total });
 
-  // Print bill bon
-  const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
-  const orderData = db.prepare('SELECT bar_slot FROM orders WHERE id = ?').get(orderId) as any;
-  printBillBon({
-    tableNumber: null,
-    barSlot: orderData?.bar_slot || null,
-    waiterName: waiter?.display_name || '',
-    items: summary.items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
-    subtotal: summary.subtotal,
-    discountType: data.discount_type,
-    discountValue: data.discount_value,
-    total,
-  });
+  // Print bill bon only if explicitly requested (Barverkauf: nicht automatisch)
+  if (data.print_bon) {
+    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
+    const orderData = db.prepare('SELECT bar_slot FROM orders WHERE id = ?').get(orderId) as any;
+    printBillBon({
+      tableNumber: null,
+      barSlot: orderData?.bar_slot || null,
+      waiterName: waiter?.display_name || '',
+      items: summary.items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
+      subtotal: summary.subtotal,
+      discountType: data.discount_type,
+      discountValue: data.discount_value,
+      total,
+    });
+  }
 
   return db.prepare('SELECT * FROM bills WHERE id = ?').get(billId);
 }

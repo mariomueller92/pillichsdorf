@@ -14,6 +14,7 @@ interface QueuedRequest {
   url: string;
   data?: any;
   timestamp: number;
+  token?: string; // Token des Users der den Request abgeschickt hat
 }
 
 function getQueue(): QueuedRequest[] {
@@ -40,9 +41,16 @@ export async function replayQueue(): Promise<void> {
   console.log(`[Offline] Sende ${queue.length} gespeicherte Anfragen...`);
   clearQueue();
 
+  const currentToken = localStorage.getItem('token') || undefined;
   for (const req of queue) {
+    // Wichtig: verwende den Token, mit dem der Request ursprünglich abgeschickt wurde,
+    // damit offline-gequeuete Bestellungen dem richtigen Kellner zugeordnet werden
+    // (und nicht dem aktuell eingeloggten User).
+    const headers: Record<string, string> = {};
+    const tokenToUse = req.token || currentToken;
+    if (tokenToUse) headers.Authorization = `Bearer ${tokenToUse}`;
     try {
-      await api.request({ method: req.method, url: req.url, data: req.data });
+      await api.request({ method: req.method, url: req.url, data: req.data, headers });
       console.log(`[Offline] Gesendet: ${req.method} ${req.url}`);
     } catch (err) {
       console.error(`[Offline] Fehlgeschlagen: ${req.method} ${req.url}`, err);
@@ -52,6 +60,9 @@ export async function replayQueue(): Promise<void> {
 
 // Auth token interceptor
 api.interceptors.request.use((config) => {
+  // Falls ein Authorization-Header bereits explizit gesetzt wurde (z.B. Replay mit
+  // gespeichertem Token), NICHT mit dem aktuell eingeloggten Token überschreiben.
+  if (config.headers?.Authorization) return config;
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -98,6 +109,7 @@ api.interceptors.response.use(
           url: config.url,
           data: config.data ? JSON.parse(config.data as string) : undefined,
           timestamp: Date.now(),
+          token: localStorage.getItem('token') || undefined,
         });
         console.log(`[Offline] Gespeichert: POST ${config.url}`);
       }

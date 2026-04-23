@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Table } from '@/types';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
-import { Users, AlertCircle, Settings } from 'lucide-react';
+import { Users, AlertCircle, Settings, Truck } from 'lucide-react';
 
 export function TableOverview() {
   const { tables, fetchTables } = useTablesStore();
@@ -51,7 +51,7 @@ export function TableOverview() {
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-bold mb-4">Tischuebersicht</h1>
+      <h1 className="text-xl font-bold mb-4">Tischübersicht</h1>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {tables.filter(t => !t.merged_into_id).map(table => (
           <button
@@ -69,14 +69,25 @@ export function TableOverview() {
               Tisch {table.table_number}
             </div>
             <Badge variant={table.status === 'frei' ? 'success' : table.status === 'rechnung_angefordert' ? 'danger' : 'warning'}>
-              {table.status === 'frei' ? 'Frei' : table.status === 'rechnung_angefordert' ? 'RECHNUNG' : 'Besetzt'}
+              {table.status === 'frei'
+                ? 'Frei'
+                : table.status === 'rechnung_angefordert'
+                  ? 'RECHNUNG'
+                  : table.has_undelivered_items
+                    ? 'Lieferung offen'
+                    : 'Besetzt'}
             </Badge>
-            {table.capacity && (
+            {table.status !== 'frei' && table.has_undelivered_items ? (
+              <div className="flex items-center gap-1 mt-2 text-xs text-amber-700 font-medium">
+                <Truck size={12} />
+                <span>Bestellung noch nicht geliefert</span>
+              </div>
+            ) : table.capacity ? (
               <div className="flex items-center gap-1 mt-2 text-xs text-slate-500">
                 <Users size={12} />
-                <span>{table.capacity} Plaetze</span>
+                <span>{table.capacity} Plätze</span>
               </div>
-            )}
+            ) : null}
           </button>
         ))}
       </div>

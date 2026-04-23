@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { replayQueue } from '@/api/client';
 import { Howl } from 'howler';
+import { toast } from 'sonner';
 
 const notificationSound = new Howl({
   src: ['/sounds/notification.mp3'],
@@ -65,6 +66,13 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
 
     socket.on('order:moved_to_table', () => {
       useTablesStore.getState().fetchTables();
+    });
+
+    socket.on('printer:error', (data: { message: string }) => {
+      toast.error(`Drucker: ${data.message || 'Fehler oder offline'}`, {
+        duration: 10000,
+        description: 'Bitte Drucker prüfen (Papier, Verbindung, eingeschaltet).',
+      });
     });
 
     socket.on('connect', () => {

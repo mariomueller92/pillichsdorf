@@ -42,6 +42,7 @@ export interface Table {
   merged_into_id: number | null;
   is_active: number;
   has_pending_items?: number;
+  has_undelivered_items?: number;
   oldest_pending_at?: string | null;
   session_started_at?: string | null;
 }

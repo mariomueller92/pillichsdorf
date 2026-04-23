@@ -11,6 +11,13 @@ export function listTables(): Table[] {
         WHERE o.table_id = t.id
           AND o.status IN ('offen', 'in_bearbeitung', 'fertig')
       ) THEN 1 ELSE 0 END AS has_pending_items,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.table_id = t.id
+          AND o.status != 'storniert'
+          AND oi.status IN ('neu', 'in_zubereitung', 'fertig')
+      ) THEN 1 ELSE 0 END AS has_undelivered_items,
       (
         SELECT MIN(o.created_at) FROM orders o
         WHERE o.table_id = t.id

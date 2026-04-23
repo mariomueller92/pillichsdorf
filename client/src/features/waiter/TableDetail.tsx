@@ -120,6 +120,11 @@ export function TableDetail() {
   if (loading) return <div className="flex items-center justify-center h-64"><Spinner /></div>;
   if (!tableData) return <div className="p-4">Tisch nicht gefunden</div>;
 
+  // Abrechnen ausgrauen wenn Tisch leer oder keine offenen Positionen
+  const canSettle = tableData.status !== 'frei' && (tableData.orders ?? []).some((o: any) =>
+    (o.items ?? []).some((i: any) => i.status !== 'storniert' && i.status !== 'serviert')
+  );
+
   const freeTables = tables.filter(t => t.status === 'frei' && t.id !== parseInt(id!) && !t.merged_into_id);
   const otherBesetzt = tables.filter(t => t.id !== parseInt(id!) && t.status === 'besetzt' && !t.merged_into_id);
 
@@ -161,7 +166,7 @@ export function TableDetail() {
         }} size="md">
           <span className="flex items-center gap-2"><Bell size={18} /> Rechnung</span>
         </Button>
-        <Button variant="success" onClick={() => navigate(`/abrechnung/${id}`)} size="md">
+        <Button variant="success" onClick={() => navigate(`/abrechnung/${id}`)} size="md" disabled={!canSettle}>
           <span className="flex items-center gap-2"><Receipt size={18} /> Abrechnen</span>
         </Button>
         <Button variant="ghost" onClick={() => setShowTransfer(true)} size="md">
@@ -270,7 +275,7 @@ export function TableDetail() {
 
       {/* Transfer Modal */}
       <Modal open={showTransfer} onClose={() => setShowTransfer(false)} title="Bestellungen transferieren">
-        <p className="text-sm text-slate-500 mb-3">Ziel-Tisch waehlen:</p>
+        <p className="text-sm text-slate-500 mb-3">Ziel-Tisch wählen:</p>
         <div className="grid grid-cols-3 gap-2">
           {[...freeTables, ...otherBesetzt].map(t => (
             <button
@@ -288,7 +293,7 @@ export function TableDetail() {
 
       {/* Merge Modal */}
       <Modal open={showMerge} onClose={() => setShowMerge(false)} title="Tische zusammenlegen">
-        <p className="text-sm text-slate-500 mb-3">Tisch zum Zusammenlegen waehlen:</p>
+        <p className="text-sm text-slate-500 mb-3">Tisch zum Zusammenlegen wählen:</p>
         <div className="grid grid-cols-3 gap-2">
           {tables.filter(t => t.id !== parseInt(id!) && !t.merged_into_id && t.is_active).map(t => (
             <button

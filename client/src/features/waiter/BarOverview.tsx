@@ -157,7 +157,7 @@ export function BarOverview() {
       {orders.length === 0 && (
         <div className="flex flex-col items-center justify-center text-slate-400 py-12">
           <Beer size={48} className="mb-3 opacity-50" />
-          <p className="text-lg font-medium">Keine offenen Barverkaeufe</p>
+          <p className="text-lg font-medium">Keine offenen Barverkäufe</p>
           <Button variant="primary" className="mt-4" onClick={() => navigate('/bestellen/bar')}>
             Neuen Barverkauf starten
           </Button>
@@ -302,7 +302,7 @@ export function BarOverview() {
         onClose={() => setMovingOrder(null)}
         title={`${movingOrder?.bar_slot || 'Bar'} auf Tisch verschieben`}
       >
-        <p className="text-sm text-slate-500 mb-3">Ziel-Tisch waehlen:</p>
+        <p className="text-sm text-slate-500 mb-3">Ziel-Tisch wählen:</p>
         <div className="grid grid-cols-3 gap-2">
           {tables.filter(t => t.status === 'frei' && !t.merged_into_id).map(t => (
             <button
@@ -323,7 +323,7 @@ export function BarOverview() {
           ))}
         </div>
         {tables.filter(t => t.status === 'frei' && !t.merged_into_id).length === 0 && (
-          <p className="text-center text-slate-400 py-4">Keine freien Tische verfuegbar</p>
+          <p className="text-center text-slate-400 py-4">Keine freien Tische verfügbar</p>
         )}
       </Modal>
     </div>

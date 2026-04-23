@@ -14,7 +14,8 @@ import tablesRoutes from './routes/tables.routes.js';
 import ordersRoutes from './routes/orders.routes.js';
 import billingRoutes from './routes/billing.routes.js';
 import statsRoutes from './routes/stats.routes.js';
-import { initPrinter } from './printer/index.js';
+import { initPrinter, setPrinterErrorReporter } from './printer/index.js';
+import { emitPrinterError } from './services/socket.service.js';
 
 const app = express();
 const server = createServer(app);
@@ -68,6 +69,9 @@ async function start() {
   runMigrations();
   await seedDefaultData();
   initPrinter();
+  setPrinterErrorReporter((msg, isRealError) => {
+    if (isRealError) emitPrinterError(msg);
+  });
 
   server.listen(config.port, config.host, () => {
     console.log(`[Server] Laeuft auf http://${config.host}:${config.port}`);

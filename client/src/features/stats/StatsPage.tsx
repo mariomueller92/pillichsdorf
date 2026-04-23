@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import { BarChart3, RefreshCw, Trophy, Users, Tags, Euro } from 'lucide-react';
+import { BarChart3, RefreshCw, Trophy, Users, Tags, Euro, Trash2 } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import * as statsApi from '@/api/stats.api';
+import { useAuthStore } from '@/stores/authStore';
+import { toast } from 'sonner';
 
 type RangeKey = 'today' | 'week' | 'month' | 'all';
 
@@ -36,6 +38,9 @@ export function StatsPage() {
   const [range, setRange] = useState<RangeKey>('today');
   const [bundle, setBundle] = useState<statsApi.StatsBundle | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
+  const user = useAuthStore(s => s.user);
+  const isAdmin = user?.role === 'admin';
 
   const load = useCallback(async () => {
     const { from, to } = rangeBounds(range);
@@ -46,6 +51,26 @@ export function StatsPage() {
       setLoading(false);
     }
   }, [range]);
+
+  const handleReset = async () => {
+    const ok = confirm(
+      'STATISTIK WIRKLICH ZURÜCKSETZEN?\n\n' +
+      'Alle Rechnungen, Bestellungen und Positionen werden gelöscht.\n' +
+      'Menü, Benutzer und Tische bleiben erhalten.\n\n' +
+      'Diese Aktion kann NICHT rückgängig gemacht werden.'
+    );
+    if (!ok) return;
+    setResetting(true);
+    try {
+      const r = await statsApi.resetStats();
+      toast.success(`Zurückgesetzt: ${r.bills} Rechnungen, ${r.orders} Bestellungen gelöscht`);
+      load();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Reset fehlgeschlagen');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -60,9 +85,21 @@ export function StatsPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <BarChart3 size={26} /> Statistik
         </h1>
-        <button onClick={load} className="p-2 rounded-lg hover:bg-slate-200 active:scale-90">
-          <RefreshCw size={20} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={load} className="p-2 rounded-lg hover:bg-slate-200 active:scale-90">
+            <RefreshCw size={20} />
+          </button>
+          {isAdmin && (
+            <button
+              onClick={handleReset}
+              disabled={resetting}
+              title="Statistik zurücksetzen (Admin)"
+              className="p-2 rounded-lg text-red-600 hover:bg-red-50 active:scale-90 disabled:opacity-50"
+            >
+              <Trash2 size={20} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Range Switcher */}
@@ -96,7 +133,7 @@ export function StatsPage() {
             {/* Top-Produkte */}
             <Panel icon={<Trophy size={18} className="text-amber-500" />} title="Top-Produkte">
               {bundle.top_items.length === 0 ? (
-                <Empty text="Keine Verkaeufe" />
+                <Empty text="Keine Verkäufe" />
               ) : (
                 <div className="space-y-1">
                   {bundle.top_items.map((ti, idx) => {

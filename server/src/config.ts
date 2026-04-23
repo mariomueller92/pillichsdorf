@@ -14,5 +14,12 @@ export const config = {
     name: process.env.PRINTER_NAME || 'Knub Thermica',
     width: parseInt(process.env.PRINTER_WIDTH || '32', 10),
   },
+  company: {
+    name: process.env.COMPANY_NAME || 'RAINER WEIN',
+    address1: process.env.COMPANY_ADDRESS1 || '',
+    address2: process.env.COMPANY_ADDRESS2 || '',
+    betriebsnummer: process.env.COMPANY_BETRIEBSNUMMER || '',
+    footer: process.env.COMPANY_FOOTER || 'Vielen Dank!',
+  },
   logLevel: process.env.LOG_LEVEL || 'info',
 };

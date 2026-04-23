@@ -29,10 +29,12 @@ export async function settleOrder(orderId: number, body: {
   discount_type?: string | null;
   discount_value?: number;
   notes?: string | null;
+  print_bon?: boolean;
 }): Promise<any> {
   const { data } = await api.post(`/billing/order/${orderId}/settle`, body);
   return data;
 }
+
 
 export async function settleItems(body: {
   table_id: number;

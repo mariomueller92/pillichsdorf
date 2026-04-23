@@ -11,7 +11,7 @@ import { Plus, Pencil, Trash2 } from 'lucide-react';
 const roleLabels: Record<Role, string> = {
   admin: 'Admin',
   kellner: 'Kellner',
-  kueche_schank: 'Kueche/Schank',
+  kueche_schank: 'Küche/Schank',
 };
 
 export function UserManagement() {
@@ -114,7 +114,7 @@ export function UserManagement() {
               className="rounded-lg border border-slate-300 px-3 py-2.5"
             >
               <option value="kellner">Kellner</option>
-              <option value="kueche_schank">Kueche/Schank</option>
+              <option value="kueche_schank">Küche/Schank</option>
               <option value="admin">Admin</option>
             </select>
           </div>
