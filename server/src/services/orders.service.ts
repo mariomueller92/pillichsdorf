@@ -115,10 +115,11 @@ export function createOrder(data: {
     items: order.items,
   });
 
-  // Print unified bon (sofort items on top, kueche items on bottom with tear zone)
-  // Barverkauf-Direktausgabe (z.B. Popcorn): Client kann print_order_bon=false setzen,
-  // dann wird kein Bestellschein gedruckt.
-  const shouldPrintOrder = data.print_order_bon !== false;
+  // Bestellbon drucken (Sofort-Positionen oben, Kueche unten mit Abrisskante).
+  // Bei Barverkäufen (kein Tisch) grundsätzlich KEIN Bestellbon — Ware wird direkt
+  // an der Bar ausgegeben. Zusätzlich kann der Client explizit print_order_bon=false setzen.
+  const isBarOrder = !data.table_id;
+  const shouldPrintOrder = data.print_order_bon !== false && !isBarOrder;
   if (shouldPrintOrder) {
     printUnifiedBon({
       orderId: order.id,
@@ -170,8 +171,9 @@ export function addItems(orderId: number, items: Array<{ menu_item_id: number; q
 
   const updated = getOrder(orderId);
 
-  // Emit update + print unified bon for new items only
+  // Emit update + print unified bon for new items only — Barbestellungen bekommen keinen Bon.
   const newItems = updated.items.filter((i: any) => i.status === 'neu');
+  const isBarOrder = !updated.table_id;
   if (newItems.length > 0) {
     socketService.emitOrderNew('schank', {
       orderId: updated.id,
@@ -182,7 +184,7 @@ export function addItems(orderId: number, items: Array<{ menu_item_id: number; q
       createdAt: updated.created_at,
     });
 
-    printUnifiedBon({
+    if (!isBarOrder) printUnifiedBon({
       orderId: updated.id,
       tableNumber: updated.table_number,
       barSlot: updated.bar_slot,

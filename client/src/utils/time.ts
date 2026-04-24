@@ -9,7 +9,7 @@ export function parseDbTime(s: string | null | undefined): Date {
 export function formatDbTimeHM(s: string | null | undefined): string {
   const d = parseDbTime(s);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna' });
 }
 
 export function minutesSince(s: string | null | undefined, now: number = Date.now()): number {

@@ -46,7 +46,7 @@ export function OrderScreen() {
       await submitOrder(isBarOrder ? null : tableId, orderNotes || undefined);
       toast.success('Bestellung gesendet!');
       setShowCart(false);
-      navigate('/tische');
+      navigate(isBarOrder ? '/bar' : '/tische');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Fehler beim Senden');
     } finally {

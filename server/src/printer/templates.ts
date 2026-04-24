@@ -42,7 +42,7 @@ const CUT_MARK_LINE = '- - - - - - - - - - - - - - - -';
 export function printUnifiedBon(data: UnifiedBonData): boolean {
   if (!isPrinterEnabled()) return false;
 
-  const time = new Date(data.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  const time = new Date(data.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna' });
   const isBar = !data.tableNumber;
   const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
   const splitSuffix = data.splitPart ? ` (Teil ${data.splitPart.index}/${data.splitPart.total})` : '';
@@ -64,7 +64,7 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
     } else {
       // Tischnummer sehr gross
       r.center().bold(true).quad(true)
-        .line(`T ${data.tableNumber}`)
+        .line(`TISCH ${data.tableNumber}`)
         .quad(false).bold(false).left();
     }
   };
@@ -158,11 +158,11 @@ export function printBillBon(data: BillBonData): boolean {
       r.center().big(true).line(data.barSlot).big(false).left();
     }
   } else {
-    r.center().bold(true).quad(true).line(`T ${data.tableNumber}`).quad(false).bold(false).left();
+    r.center().bold(true).quad(true).line(`TISCH ${data.tableNumber}`).quad(false).bold(false).left();
   }
 
   r.left()
-    .line(`${now.toLocaleDateString('de-DE')}  ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${splitSuffix}`)
+    .line(`${now.toLocaleDateString('de-DE', { timeZone: 'Europe/Vienna' })}  ${now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna' })}${splitSuffix}`)
     .line(`Kellner: ${data.waiterName}`)
     .separator();
 

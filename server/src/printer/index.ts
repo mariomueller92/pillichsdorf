@@ -26,7 +26,33 @@ const COMMANDS = {
   FEED: '\n',
 };
 
-// Map UTF-8 string to CP1252 bytes so umlauts print correctly on the thermal printer
+// Transliterate all non-ASCII glyphs to plain ASCII equivalents for the thermal printer.
+// Der Bondrucker des Kunden stellt Umlaute/Akzente nicht zuverlässig dar — also
+// ersetzen wir sie hart durch ae/oe/ue/ss bzw. Grundbuchstaben.
+function sanitizeForPrint(text: string): string {
+  const map: Record<string, string> = {
+    'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss',
+    'Ä': 'Ae', 'Ö': 'Oe', 'Ü': 'Ue',
+    'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'å': 'a',
+    'Á': 'A', 'À': 'A', 'Â': 'A', 'Ã': 'A', 'Å': 'A',
+    'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+    'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+    'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+    'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I',
+    'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o',
+    'Ó': 'O', 'Ò': 'O', 'Ô': 'O', 'Õ': 'O',
+    'ú': 'u', 'ù': 'u', 'û': 'u',
+    'Ú': 'U', 'Ù': 'U', 'Û': 'U',
+    'ñ': 'n', 'Ñ': 'N',
+    'ç': 'c', 'Ç': 'C',
+    '–': '-', '—': '-', '…': '...',
+    '„': '"', '“': '"', '”': '"', '‚': "'", '‘': "'", '’': "'",
+  };
+  return text.replace(/[^\x00-\x7F]/g, ch => map[ch] ?? ch);
+}
+
+// Map ASCII-sanitized string to CP1252 bytes. (Nach sanitizeForPrint sollte hier
+// eigentlich nur noch ASCII ankommen — CP1252-Mapping bleibt als Sicherheitsnetz.)
 function toCp1252(text: string): Buffer {
   const bytes: number[] = [];
   for (const ch of text) {
@@ -95,8 +121,9 @@ export function printRaw(content: string): boolean {
     return false;
   }
 
-  // content is a UTF-8 JS string produced by ReceiptBuilder; convert to CP1252 bytes
-  const buffer = toCp1252(content);
+  // content ist ein UTF-8 String vom ReceiptBuilder → zunächst alle Umlaute/Akzente
+  // transliterieren (Rosé→Rose, ä→ae usw.), dann als CP1252 an den Drucker.
+  const buffer = toCp1252(sanitizeForPrint(content));
   console.log(`[Drucker] printRaw: ${buffer.length} Bytes, Drucker="${printerName}"`);
 
   if (buffer.length === 0) {

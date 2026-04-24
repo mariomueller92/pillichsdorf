@@ -156,10 +156,10 @@ export function ZentralDashboard() {
         <div className="flex items-center gap-3">
           <div className="text-right">
             <div className="text-sm text-slate-500 leading-tight">
-              {new Date(now).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
+              {new Date(now).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Vienna' })}
             </div>
             <div className="text-xl font-mono font-semibold leading-tight tabular-nums">
-              {new Date(now).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              {new Date(now).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Vienna' })}
             </div>
           </div>
           <button onClick={fetchAll} className="p-2 rounded-lg hover:bg-slate-200 active:scale-90">

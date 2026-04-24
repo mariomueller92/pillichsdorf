@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
+import { parseDbTime } from '@/utils/time';
 
 type AdminOrder = {
   id: number;
@@ -36,12 +37,12 @@ const statusVariant = (s: string): 'success' | 'danger' | 'warning' | 'info' | '
 };
 
 const formatDateKey = (iso: string) => {
-  const d = new Date(iso);
-  return d.toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const d = parseDbTime(iso);
+  return d.toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Europe/Vienna' });
 };
 
 const formatTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  parseDbTime(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna' });
 
 const toInputDate = (d: Date) => d.toISOString().slice(0, 10);
 
