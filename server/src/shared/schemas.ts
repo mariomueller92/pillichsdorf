@@ -128,7 +128,10 @@ export const settleTableSchema = z.object({
 
 export const settleItemsSchema = z.object({
   table_id: z.number().int().positive(),
-  order_item_ids: z.array(z.number().int().positive()).min(1),
+  items: z.array(z.object({
+    order_item_id: z.number().int().positive(),
+    quantity: z.number().int().positive(),
+  })).min(1),
   discount_type: z.enum(DISCOUNT_TYPES).nullable().optional(),
   discount_value: z.number().min(0).default(0),
   notes: z.string().nullable().optional(),

@@ -6,9 +6,11 @@ import { printBillBon } from '../printer/templates.js';
 export function getTableSummary(tableId: number) {
   const db = getDb();
 
-  // Get all unbilled order items for this table (including merged tables)
+  // Get all order items with remaining (not yet billed) quantity for this table
   const items = db.prepare(`
-    SELECT oi.id, oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price, oi.notes, oi.status,
+    SELECT oi.id, oi.order_id, oi.menu_item_id,
+           (oi.quantity - COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)) AS quantity,
+           oi.unit_price, oi.notes, oi.status,
            mi.name as item_name, mc.name as category_name, mc.target as category_target,
            o.created_at as order_created_at
     FROM order_items oi
@@ -18,7 +20,7 @@ export function getTableSummary(tableId: number) {
     WHERE o.table_id = ?
       AND o.status IN ('offen', 'in_bearbeitung', 'fertig', 'serviert')
       AND oi.status != 'storniert'
-      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
+      AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
     ORDER BY o.created_at, oi.created_at
   `).all(tableId) as any[];
 
@@ -82,11 +84,12 @@ export function settleTable(
       WHERE table_id = ? AND status IN ('offen', 'in_bearbeitung', 'fertig')
     `).run(tableId);
 
-    // Mark all order items as serviert
+    // Mark fully-billed order items as serviert (status only, not quantity)
     db.prepare(`
       UPDATE order_items SET status = 'serviert'
       WHERE order_id IN (SELECT id FROM orders WHERE table_id = ?)
         AND status != 'storniert'
+        AND quantity <= COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = order_items.id), 0)
     `).run(tableId);
 
     return billId;
@@ -151,7 +154,7 @@ export function printBillForTable(tableId: number, waiterId: number) {
 export function settleItems(
   tableId: number,
   waiterId: number,
-  orderItemIds: number[],
+  requested: Array<{ order_item_id: number; quantity: number }>,
   data: {
     discount_type?: string | null;
     discount_value?: number;
@@ -161,24 +164,48 @@ export function settleItems(
 ) {
   const db = getDb();
 
-  // Fetch the specific items (excluding already-billed ones)
-  const placeholders = orderItemIds.map(() => '?').join(',');
-  const items = db.prepare(`
-    SELECT oi.*, mi.name as item_name, o.table_id
+  // Aggregate requested quantities (in case the same id appears twice)
+  const wanted = new Map<number, number>();
+  for (const r of requested) {
+    wanted.set(r.order_item_id, (wanted.get(r.order_item_id) ?? 0) + r.quantity);
+  }
+  const ids = Array.from(wanted.keys());
+  const placeholders = ids.map(() => '?').join(',');
+
+  // Load order items along with already-billed quantity
+  const rows = db.prepare(`
+    SELECT oi.id, oi.unit_price, oi.quantity AS total_quantity,
+           COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0) AS billed_quantity,
+           mi.name AS item_name
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
     JOIN menu_items mi ON oi.menu_item_id = mi.id
     WHERE oi.id IN (${placeholders})
       AND o.table_id = ?
       AND oi.status != 'storniert'
-      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
-  `).all(...orderItemIds, tableId) as any[];
+  `).all(...ids, tableId) as any[];
 
-  if (items.length === 0) {
+  if (rows.length === 0) {
     throw new AppError(400, 'Keine gueltigen Posten gefunden');
   }
 
-  const subtotal = items.reduce((sum: number, item: any) => sum + (item.unit_price * item.quantity), 0);
+  // Validate each requested quantity against the remaining
+  const billable = rows.map((row: any) => {
+    const reqQty = wanted.get(row.id)!;
+    const remaining = row.total_quantity - row.billed_quantity;
+    if (reqQty > remaining) {
+      throw new AppError(400, `Position "${row.item_name}": angeforderte Menge ${reqQty} > offene Menge ${remaining}`);
+    }
+    return {
+      order_item_id: row.id,
+      quantity: reqQty,
+      unit_price: row.unit_price,
+      item_name: row.item_name,
+      fully_billed: row.billed_quantity + reqQty >= row.total_quantity,
+    };
+  });
+
+  const subtotal = billable.reduce((s, i) => s + i.unit_price * i.quantity, 0);
   let total = Math.round(subtotal * 100) / 100;
 
   const discountType = data.discount_type || null;
@@ -202,14 +229,10 @@ export function settleItems(
     const insertBillItem = db.prepare(
       'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)'
     );
-    for (const item of items) {
-      insertBillItem.run(id, item.id, item.quantity, item.unit_price);
-    }
-
-    // Mark the actually-processed items as serviert (ignore stale/already-billed ids)
-    const markStmt = db.prepare("UPDATE order_items SET status = 'serviert' WHERE id = ?");
-    for (const item of items) {
-      markStmt.run(item.id);
+    const markServiert = db.prepare("UPDATE order_items SET status = 'serviert' WHERE id = ?");
+    for (const item of billable) {
+      insertBillItem.run(id, item.order_item_id, item.quantity, item.unit_price);
+      if (item.fully_billed) markServiert.run(item.order_item_id);
     }
 
     return id;
@@ -222,7 +245,7 @@ export function settleItems(
       tableNumber: table?.table_number || null,
       barSlot: null,
       waiterName: waiter?.display_name || '',
-      items: items.map((i: any) => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
+      items: billable.map(i => ({ quantity: i.quantity, item_name: i.item_name, unit_price: i.unit_price })),
       subtotal,
       discountType,
       discountValue,
@@ -245,13 +268,15 @@ export function getOrderSummary(orderId: number) {
   if (!order) throw new AppError(404, 'Bestellung nicht gefunden');
 
   const items = db.prepare(`
-    SELECT oi.id, oi.order_id, oi.menu_item_id, oi.quantity, oi.unit_price, oi.notes, oi.status,
+    SELECT oi.id, oi.order_id, oi.menu_item_id,
+           (oi.quantity - COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)) AS quantity,
+           oi.unit_price, oi.notes, oi.status,
            mi.name as item_name, mc.name as category_name
     FROM order_items oi
     JOIN menu_items mi ON oi.menu_item_id = mi.id
     JOIN menu_categories mc ON mi.category_id = mc.id
     WHERE oi.order_id = ? AND oi.status != 'storniert'
-      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
+      AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
   `).all(orderId) as any[];
 
   const subtotal = items.reduce((sum: number, item: any) => sum + (item.unit_price * item.quantity), 0);

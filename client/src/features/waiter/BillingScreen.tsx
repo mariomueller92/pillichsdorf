@@ -5,7 +5,7 @@ import * as tablesApi from '@/api/tables.api';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
-import { ArrowLeft, Percent, Euro, AlertTriangle, Printer, Split } from 'lucide-react';
+import { ArrowLeft, Percent, Euro, AlertTriangle, Printer, Split, Minus, Plus } from 'lucide-react';
 
 const DELIVERED_STATUS = 'serviert';
 const statusLabel: Record<string, string> = {
@@ -22,7 +22,7 @@ export function BillingScreen() {
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed' | null>(null);
   const [discountValue, setDiscountValue] = useState(0);
   const [settling, setSettling] = useState(false);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Map<number, number>>(new Map());
   const [splitting, setSplitting] = useState(false);
   const [splitMode, setSplitMode] = useState(false);
   const [showFreePrompt, setShowFreePrompt] = useState(false);
@@ -31,7 +31,7 @@ export function BillingScreen() {
     if (!tischId) return;
     const data = await billingApi.getTableSummary(parseInt(tischId));
     setSummary(data);
-    setSelected(new Set());
+    setSelected(new Map());
     setLoading(false);
     return data;
   };
@@ -40,17 +40,19 @@ export function BillingScreen() {
     reload();
   }, [tischId]);
 
-  const toggleSelect = (id: number) => {
+  const setQty = (id: number, qty: number, max: number) => {
     setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      const next = new Map(prev);
+      const clamped = Math.max(0, Math.min(max, qty));
+      if (clamped === 0) next.delete(id);
+      else next.set(id, clamped);
       return next;
     });
   };
 
+  const selectedCount = Array.from(selected.values()).reduce((s, n) => s + n, 0);
   const selectedSubtotal = summary?.items
-    .filter((i: any) => selected.has(i.id))
-    .reduce((s: number, i: any) => s + i.unit_price * i.quantity, 0) ?? 0;
+    .reduce((s: number, i: any) => s + i.unit_price * (selected.get(i.id) ?? 0), 0) ?? 0;
 
   const getTotal = () => {
     if (!summary) return 0;
@@ -114,12 +116,12 @@ export function BillingScreen() {
   };
 
   const handleSplit = async () => {
-    if (!tischId || selected.size === 0) return;
+    if (!tischId || selectedCount === 0) return;
     setSplitting(true);
     try {
       await billingApi.settleItems({
         table_id: parseInt(tischId),
-        order_item_ids: Array.from(selected),
+        items: Array.from(selected.entries()).map(([order_item_id, quantity]) => ({ order_item_id, quantity })),
         discount_type: discountType,
         discount_value: discountValue,
         print_bon: true,
@@ -186,9 +188,9 @@ export function BillingScreen() {
           <span>
             {splitMode ? 'Positionen für Teilrechnung anhaken' : `${summary.items.length} Position(en)`}
           </span>
-          {splitMode && selected.size > 0 && (
+          {splitMode && selectedCount > 0 && (
             <button
-              onClick={() => setSelected(new Set())}
+              onClick={() => setSelected(new Map())}
               className="text-primary font-medium"
             >
               Auswahl aufheben
@@ -197,20 +199,36 @@ export function BillingScreen() {
         </div>
         {summary.items.map((item: any) => {
           const undelivered = item.status !== DELIVERED_STATUS;
-          const isSelected = selected.has(item.id);
+          const sel = selected.get(item.id) ?? 0;
+          const isSelected = sel > 0;
           return (
-            <label
+            <div
               key={item.id}
-              className={`flex justify-between items-center px-4 py-2.5 border-b border-slate-100 last:border-b-0 ${splitMode ? 'cursor-pointer' : ''} ${isSelected ? 'bg-primary/5' : undelivered ? 'bg-amber-50/50' : ''}`}
+              className={`flex justify-between items-center px-4 py-2.5 border-b border-slate-100 last:border-b-0 ${isSelected ? 'bg-primary/5' : undelivered ? 'bg-amber-50/50' : ''}`}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {splitMode && (
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleSelect(item.id)}
-                    className="w-5 h-5 accent-primary shrink-0"
-                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setQty(item.id, sel - 1, item.quantity)}
+                      disabled={sel === 0}
+                      className="w-8 h-8 rounded-full border border-slate-300 flex items-center justify-center disabled:opacity-30"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span className="w-8 text-center text-sm font-semibold tabular-nums">
+                      {sel}/{item.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQty(item.id, sel + 1, item.quantity)}
+                      disabled={sel >= item.quantity}
+                      className="w-8 h-8 rounded-full border border-slate-300 flex items-center justify-center disabled:opacity-30"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
                 )}
                 <div className="min-w-0">
                   <span className="font-medium text-sm">{item.quantity}x {item.item_name}</span>
@@ -225,7 +243,7 @@ export function BillingScreen() {
               <span className="font-medium text-sm shrink-0">
                 {(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;
               </span>
-            </label>
+            </div>
           );
         })}
       </div>
@@ -248,7 +266,7 @@ export function BillingScreen() {
         <div className="bg-primary/5 border border-primary/30 rounded-xl p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-sm font-medium">Teilrechnung: {selected.size} Position(en)</div>
+              <div className="text-sm font-medium">Teilrechnung: {selectedCount} Stück</div>
               <div className="text-xs text-slate-500">
                 Nach dem Drucken verschwinden diese Posten aus der Liste.
               </div>
@@ -263,13 +281,13 @@ export function BillingScreen() {
               variant="ghost"
               size="md"
               className="flex-1"
-              onClick={() => { setSplitMode(false); setSelected(new Set()); }}
+              onClick={() => { setSplitMode(false); setSelected(new Map()); }}
             >
               Abbrechen
             </Button>
             <Button
               onClick={handleSplit}
-              disabled={splitting || selected.size === 0}
+              disabled={splitting || selectedCount === 0}
               size="md"
               variant="primary"
               className="flex-1"

@@ -27,10 +27,11 @@ export function listTables(): Table[] {
         SELECT MIN(o.created_at) FROM orders o
         WHERE o.table_id = t.id
           AND o.status != 'storniert'
-          AND NOT EXISTS (
-            SELECT 1 FROM bill_items bi
-            JOIN order_items oi ON bi.order_item_id = oi.id
+          AND EXISTS (
+            SELECT 1 FROM order_items oi
             WHERE oi.order_id = o.id
+              AND oi.status != 'storniert'
+              AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
           )
       ) AS session_started_at
     FROM tables t
@@ -147,7 +148,7 @@ export function releaseTable(tableId: number): Table {
     JOIN orders o ON oi.order_id = o.id
     WHERE o.table_id = ?
       AND oi.status != 'storniert'
-      AND oi.id NOT IN (SELECT order_item_id FROM bill_items)
+      AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
   `).get(tableId) as { count: number };
   if (unbilled.count > 0) {
     throw new AppError(400, 'Tisch hat nicht abgerechnete Posten');
@@ -203,10 +204,11 @@ export function getTableWithOrders(id: number) {
     JOIN users u ON o.waiter_id = u.id
     WHERE o.table_id = ?
       AND o.status != 'storniert'
-      AND NOT EXISTS (
-        SELECT 1 FROM bill_items bi
-        JOIN order_items oi ON bi.order_item_id = oi.id
+      AND EXISTS (
+        SELECT 1 FROM order_items oi
         WHERE oi.order_id = o.id
+          AND oi.status != 'storniert'
+          AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
       )
     ORDER BY o.created_at DESC
   `).all(id) as any[];

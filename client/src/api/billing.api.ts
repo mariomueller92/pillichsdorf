@@ -38,7 +38,7 @@ export async function settleOrder(orderId: number, body: {
 
 export async function settleItems(body: {
   table_id: number;
-  order_item_ids: number[];
+  items: Array<{ order_item_id: number; quantity: number }>;
   discount_type?: string | null;
   discount_value?: number;
   notes?: string | null;

@@ -28,7 +28,7 @@ router.post('/table/:tableId/print-bill', auth, role(['admin', 'kellner']), (req
 
 router.post('/settle-items', auth, role(['admin', 'kellner']), validate(settleItemsSchema), (req: Request, res: Response, next: NextFunction) => {
   try {
-    const bill = billingService.settleItems(req.body.table_id, req.user!.userId, req.body.order_item_ids, req.body);
+    const bill = billingService.settleItems(req.body.table_id, req.user!.userId, req.body.items, req.body);
     res.json(bill);
   } catch (err) { next(err); }
 });
