@@ -1,0 +1,4 @@
+#!/bin/sh
+# Nach jedem 'git pull' / 'git merge' ein DB-Backup ziehen.
+# Idempotent, blockiert den Merge nicht bei Fehlern.
+node "$(git rev-parse --show-toplevel)/scripts/backup-db.mjs" post-merge || true

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Backup auch bei branch-checkouts. $3 = "1" bei Branch-Wechsel, "0" bei File-Checkout.
+if [ "$3" = "1" ]; then
+  node "$(git rev-parse --show-toplevel)/scripts/backup-db.mjs" post-checkout || true
+fi
