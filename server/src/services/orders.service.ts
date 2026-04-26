@@ -280,8 +280,14 @@ function recalcOrderStatus(orderId: number) {
   if (counts.total === 0) return;
 
   let next: string;
-  if (counts.serviert + counts.storniert === counts.total && counts.serviert > 0) {
-    next = 'serviert';
+  if (counts.serviert + counts.storniert === counts.total) {
+    // All items are either serviert or storniert
+    if (counts.serviert > 0) {
+      next = 'serviert';
+    } else {
+      // All items are storniert
+      next = 'storniert';
+    }
   } else if (counts.fertig + counts.serviert + counts.storniert === counts.total && counts.fertig > 0) {
     next = 'fertig';
   } else if (counts.in_zubereitung > 0 || counts.fertig > 0 || counts.serviert > 0) {

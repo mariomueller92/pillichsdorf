@@ -142,7 +142,8 @@ export function releaseTable(tableId: number): Table {
     throw new AppError(400, 'Tisch hat offene Bestellungen und kann nicht freigegeben werden');
   }
 
-  const unbilled = db.prepare(`
+  // Prüfe ob es Positionen gibt, die weder abgerechnet noch storniert sind
+  const unbilledAndNotCancelled = db.prepare(`
     SELECT COUNT(*) as count
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.id
@@ -150,7 +151,7 @@ export function releaseTable(tableId: number): Table {
       AND oi.status != 'storniert'
       AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
   `).get(tableId) as { count: number };
-  if (unbilled.count > 0) {
+  if (unbilledAndNotCancelled.count > 0) {
     throw new AppError(400, 'Tisch hat nicht abgerechnete Posten');
   }
 
