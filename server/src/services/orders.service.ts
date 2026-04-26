@@ -486,6 +486,30 @@ export function listAllOrdersWithItems(filters: { from?: string; to?: string } =
   });
 }
 
+export function reprintOrderBon(orderId: number) {
+  const order = getOrder(orderId);
+  const items = (order.items as any[]).filter(i => i.status !== 'storniert');
+  if (items.length === 0) {
+    throw new AppError(400, 'Keine druckbaren Positionen in dieser Bestellung');
+  }
+  const ok = printUnifiedBon({
+    orderId: order.id,
+    tableNumber: order.table_number,
+    barSlot: order.bar_slot,
+    waiterName: order.waiter_name,
+    items: items.map((i: any) => ({
+      quantity: i.quantity,
+      item_name: i.item_name,
+      notes: i.notes,
+      availability_mode: i.availability_mode || 'sofort',
+    })),
+    notes: order.notes,
+    createdAt: order.created_at,
+    isReprint: true,
+  });
+  return { printed: ok, orderId };
+}
+
 export function getPendingKitchenItems() {
   const db = getDb();
   return db.prepare(`

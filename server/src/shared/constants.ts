@@ -1,6 +1,6 @@
 export const ROLES = ['admin', 'kellner', 'kueche_schank'] as const;
 
-export const TABLE_STATUSES = ['frei', 'besetzt', 'rechnung_angefordert'] as const;
+export const TABLE_STATUSES = ['frei', 'besetzt'] as const;
 
 export const AVAILABILITY_MODES = ['sofort', 'lieferzeit'] as const;
 

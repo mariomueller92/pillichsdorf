@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'kellner' | 'kueche_schank';
-export type TableStatus = 'frei' | 'besetzt' | 'rechnung_angefordert';
+export type TableStatus = 'frei' | 'besetzt';
 export type OrderStatus = 'offen' | 'in_bearbeitung' | 'fertig' | 'serviert' | 'storniert';
 export type OrderItemStatus = 'neu' | 'in_zubereitung' | 'fertig' | 'serviert' | 'storniert';
 export type CategoryTarget = 'kueche' | 'schank';

@@ -82,6 +82,12 @@ router.patch('/:id/items/:itemId', auth, (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 });
 
+router.post('/:id/reprint-bon', auth, (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(ordersService.reprintOrderBon(parseInt(req.params.id)));
+  } catch (err) { next(err); }
+});
+
 router.delete('/:id', auth, role(['admin', 'kellner']), (req: Request, res: Response, next: NextFunction) => {
   try {
     const order = ordersService.cancelOrder(parseInt(req.params.id));

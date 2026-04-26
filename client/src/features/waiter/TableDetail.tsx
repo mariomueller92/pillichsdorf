@@ -12,7 +12,7 @@ import * as ordersApi from '@/api/orders.api';
 import * as dashboardApi from '@/api/dashboard.api';
 import * as billingApi from '@/api/billing.api';
 import { toast } from 'sonner';
-import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock, DoorOpen } from 'lucide-react';
+import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock, DoorOpen, Printer } from 'lucide-react';
 import { formatDbTimeHM, minutesSince } from '@/utils/time';
 
 const itemStatusBadge: Record<string, { label: string; variant: 'warning' | 'info' | 'success' | 'danger' | 'neutral' }> = {
@@ -33,6 +33,7 @@ export function TableDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [tableData, setTableData] = useState<any>(null);
+  const [billSummary, setBillSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
@@ -49,8 +50,13 @@ export function TableDetail() {
 
   const loadTable = async () => {
     if (!id) return;
-    const data = await tablesApi.getTable(parseInt(id));
+    const tableId = parseInt(id);
+    const [data, summary] = await Promise.all([
+      tablesApi.getTable(tableId),
+      billingApi.getTableSummary(tableId).catch(() => null),
+    ]);
     setTableData(data);
+    setBillSummary(summary);
     setLoading(false);
   };
 
@@ -137,8 +143,8 @@ export function TableDetail() {
     <div className="p-4">
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl font-bold">Tisch {tableData.table_number}</h1>
-        <Badge variant={tableData.status === 'frei' ? 'success' : tableData.status === 'rechnung_angefordert' ? 'danger' : 'warning'}>
-          {tableData.status === 'frei' ? 'Frei' : tableData.status === 'rechnung_angefordert' ? 'RECHNUNG' : 'Besetzt'}
+        <Badge variant={tableData.status === 'frei' ? 'success' : 'warning'}>
+          {tableData.status === 'frei' ? 'Frei' : 'Besetzt'}
         </Badge>
       </div>
       {tableData.session_started_at && (
@@ -200,6 +206,37 @@ export function TableDetail() {
         </div>
       )}
 
+      {/* Offene Posten — aggregiert pro Artikel */}
+      {billSummary && billSummary.items?.length > 0 && billSummary.subtotal > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 mb-4">
+          <div className="px-4 py-2 border-b border-slate-100 text-xs font-medium text-slate-500">
+            Offene Posten
+          </div>
+          {(() => {
+            const agg = new Map<number, { item_name: string; quantity: number; unit_price: number }>();
+            for (const it of billSummary.items as any[]) {
+              const existing = agg.get(it.menu_item_id);
+              if (existing) existing.quantity += it.quantity;
+              else agg.set(it.menu_item_id, { item_name: it.item_name, quantity: it.quantity, unit_price: it.unit_price });
+            }
+            return Array.from(agg.values()).map((row, idx) => (
+              <div key={idx} className="flex justify-between items-center px-4 py-2 border-b border-slate-100 last:border-b-0 text-sm">
+                <span className="font-medium">{row.quantity}x {row.item_name}</span>
+                <span className="font-medium tabular-nums">
+                  {(row.unit_price * row.quantity).toFixed(2).replace('.', ',')} &euro;
+                </span>
+              </div>
+            ));
+          })()}
+          <div className="flex justify-between items-center px-4 py-2.5 bg-slate-50 rounded-b-xl">
+            <span className="font-bold">Gesamt offen</span>
+            <span className="font-bold text-lg text-primary tabular-nums">
+              {billSummary.subtotal.toFixed(2).replace('.', ',')} &euro;
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Orders */}
       <h2 className="font-semibold mb-2">Bestellungen</h2>
       {tableData.orders?.length === 0 && <p className="text-slate-500 text-sm">Keine Bestellungen</p>}
@@ -211,7 +248,23 @@ export function TableDetail() {
         <div key={order.id} className="bg-white rounded-lg border border-slate-200 p-3 mb-2">
           <div className="flex justify-between items-center mb-1">
             <span className="text-sm font-medium">#{order.id} - {order.waiter_name}</span>
-            {ob && <Badge variant={ob.variant}>{ob.label}</Badge>}
+            <div className="flex items-center gap-2">
+              {ob && <Badge variant={ob.variant}>{ob.label}</Badge>}
+              <button
+                onClick={async () => {
+                  try {
+                    await ordersApi.reprintOrderBon(order.id);
+                    toast.success('Bestellbon nachgedruckt');
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.error || 'Nachdruck fehlgeschlagen');
+                  }
+                }}
+                title="Bestellbon nachdrucken"
+                className="px-2 py-1 text-xs bg-slate-200 text-slate-700 rounded-lg font-medium active:scale-90 hover:bg-slate-300 flex items-center gap-1"
+              >
+                <Printer size={12} /> Nachdruck
+              </button>
+            </div>
           </div>
           <div className="text-xs text-slate-500 mb-2">
             {formatDbTimeHM(order.created_at)}

@@ -5,7 +5,7 @@ import * as ordersApi from '@/api/orders.api';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
-import { Clock, ChefHat, CheckCircle, AlertCircle, Truck } from 'lucide-react';
+import { Clock, ChefHat, CheckCircle, AlertCircle, Truck, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { parseDbTime, minutesSince } from '@/utils/time';
 
@@ -248,6 +248,20 @@ export function MyOrders() {
                     Zum Tisch
                   </Button>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await ordersApi.reprintOrderBon(order.id);
+                      toast.success('Bestellbon nachgedruckt');
+                    } catch (err: any) {
+                      toast.error(err?.response?.data?.error || 'Nachdruck fehlgeschlagen');
+                    }
+                  }}
+                >
+                  <span className="flex items-center gap-1"><Printer size={14} /> Nachdruck</span>
+                </Button>
               </div>
             </div>
           );

@@ -109,7 +109,6 @@ export function ZentralDashboard() {
   };
 
   const tableStatusColor = (table: { status: string; has_pending_items?: number; oldest_pending_at?: string | null }) => {
-    if (table.status === 'rechnung_angefordert') return 'bg-red-500 text-white animate-pulse';
     if (table.status === 'frei') return 'bg-green-500 text-white';
     if (table.status === 'besetzt') {
       const mins = pendingMinutes(table);
@@ -122,7 +121,6 @@ export function ZentralDashboard() {
   };
 
   const tableStatusLabel = (table: { status: string; has_pending_items?: number; oldest_pending_at?: string | null }) => {
-    if (table.status === 'rechnung_angefordert') return 'RECHNUNG';
     if (table.status === 'frei') return 'Frei';
     if (table.status === 'besetzt') {
       const mins = pendingMinutes(table);

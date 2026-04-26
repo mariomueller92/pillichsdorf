@@ -60,22 +60,18 @@ export function TableOverview() {
             className={`relative p-4 rounded-xl border-2 transition-all active:scale-95 text-left min-h-[5rem] ${
               table.status === 'frei'
                 ? 'border-green-300 bg-green-50 hover:bg-green-100'
-                : table.status === 'rechnung_angefordert'
-                  ? 'border-red-500 bg-red-100 hover:bg-red-200 animate-pulse'
-                  : 'border-orange-300 bg-orange-50 hover:bg-orange-100'
+                : 'border-orange-300 bg-orange-50 hover:bg-orange-100'
             }`}
           >
             <div className="text-2xl font-bold mb-1">
               Tisch {table.table_number}
             </div>
-            <Badge variant={table.status === 'frei' ? 'success' : table.status === 'rechnung_angefordert' ? 'danger' : 'warning'}>
+            <Badge variant={table.status === 'frei' ? 'success' : 'warning'}>
               {table.status === 'frei'
                 ? 'Frei'
-                : table.status === 'rechnung_angefordert'
-                  ? 'RECHNUNG'
-                  : table.has_undelivered_items
-                    ? 'Lieferung offen'
-                    : 'Besetzt'}
+                : table.has_undelivered_items
+                  ? 'Lieferung offen'
+                  : 'Besetzt'}
             </Badge>
             {table.status !== 'frei' && table.has_undelivered_items ? (
               <div className="flex items-center gap-1 mt-2 text-xs text-amber-700 font-medium">

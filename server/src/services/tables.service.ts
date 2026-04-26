@@ -181,20 +181,6 @@ export function releaseTable(tableId: number): Table {
   return updated;
 }
 
-export function requestBill(tableId: number): Table {
-  const table = getTable(tableId);
-  getDb().prepare(
-    "UPDATE tables SET status = 'rechnung_angefordert', updated_at = datetime('now') WHERE id = ?"
-  ).run(tableId);
-  const updated = getTable(tableId);
-  socketService.emitTableStatusChanged({
-    tableId: updated.id,
-    tableNumber: updated.table_number,
-    status: 'rechnung_angefordert',
-  });
-  return updated;
-}
-
 export function getTableWithOrders(id: number) {
   const db = getDb();
   const table = getTable(id);

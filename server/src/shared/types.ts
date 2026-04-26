@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'kellner' | 'kueche_schank';
 
-export type TableStatus = 'frei' | 'besetzt' | 'rechnung_angefordert';
+export type TableStatus = 'frei' | 'besetzt';
 
 export type AvailabilityMode = 'sofort' | 'lieferzeit';
 

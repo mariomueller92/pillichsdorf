@@ -22,11 +22,6 @@ export async function toggleItemMode(itemId: number): Promise<MenuItem> {
   return data;
 }
 
-export async function requestBill(tableId: number): Promise<any> {
-  const { data } = await api.post(`/tables/${tableId}/request-bill`);
-  return data;
-}
-
 export async function moveBarToTable(orderId: number, targetTableId: number): Promise<any> {
   const { data } = await api.post(`/orders/${orderId}/move-to-table`, { target_table_id: targetTableId });
   return data;

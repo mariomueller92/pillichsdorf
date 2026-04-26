@@ -109,7 +109,7 @@ export function runMigrations(): void {
       capacity        INTEGER,
       sort_order      INTEGER NOT NULL DEFAULT 0,
       status          TEXT    NOT NULL DEFAULT 'frei'
-                      CHECK (status IN ('frei', 'besetzt', 'rechnung_angefordert')),
+                      CHECK (status IN ('frei', 'besetzt')),
       merged_into_id  INTEGER REFERENCES tables(id) ON DELETE SET NULL,
       is_active       INTEGER NOT NULL DEFAULT 1,
       created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -218,6 +218,7 @@ export function runMigrations(): void {
   `);
 
   runDataMigration(database, 'seed_menu_kgf_april26', seedMenuKgfApril26);
+  runDataMigration(database, 'drop_status_rechnung_angefordert', dropStatusRechnungAngefordert);
 
   console.log('[DB] Migrations ausgefuehrt');
 }
@@ -235,6 +236,18 @@ function runDataMigration(db: Database.Database, name: string, fn: (db: Database
   });
   tx();
   console.log(`[DB] Migration angewendet: ${name}`);
+}
+
+/**
+ * Status 'rechnung_angefordert' wurde abgeschafft. Bestehende Zeilen mit
+ * diesem Status auf 'besetzt' rückführen und CHECK-Constraint neu setzen.
+ */
+function dropStatusRechnungAngefordert(db: Database.Database): void {
+  // Bestehende 'rechnung_angefordert'-Zeilen auf 'besetzt' zurückführen.
+  // Die alte CHECK-Constraint auf der Tabelle erlaubt 'rechnung_angefordert' noch,
+  // wir schreiben nur keinen Code mehr, der diesen Status setzt.
+  // Frische DBs bekommen via CREATE TABLE bereits den neuen CHECK.
+  db.exec("UPDATE tables SET status = 'besetzt', updated_at = datetime('now') WHERE status = 'rechnung_angefordert'");
 }
 
 /**

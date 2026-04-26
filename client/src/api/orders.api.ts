@@ -59,3 +59,8 @@ export async function transferOrder(orderId: number, targetTableId: number): Pro
   const { data } = await api.post<Order>(`/orders/${orderId}/transfer`, { target_table_id: targetTableId });
   return data;
 }
+
+export async function reprintOrderBon(orderId: number): Promise<{ printed: boolean; orderId: number }> {
+  const { data } = await api.post(`/orders/${orderId}/reprint-bon`);
+  return data;
+}

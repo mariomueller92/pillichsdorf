@@ -138,15 +138,6 @@ export function printBillForTable(tableId: number, waiterId: number) {
     total: summary.subtotal,
   });
 
-  db.prepare(
-    "UPDATE tables SET status = 'rechnung_angefordert', updated_at = datetime('now') WHERE id = ?"
-  ).run(tableId);
-
-  socketService.emitTableStatusChanged({
-    tableId,
-    tableNumber: table?.table_number,
-    status: 'rechnung_angefordert',
-  });
 
   return { printed: ok, subtotal: summary.subtotal };
 }

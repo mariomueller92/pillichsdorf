@@ -17,6 +17,7 @@ interface UnifiedBonData {
   notes?: string | null;
   createdAt: string;
   splitPart?: { index: number; total: number } | null;
+  isReprint?: boolean;
 }
 
 interface BillBonData {
@@ -71,8 +72,13 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
 
   const printHeader = (section: string) => {
     r.center().bold(true)
-      .separator('=')
-      .line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}${splitSuffix}`)
+      .separator('=');
+    if (data.isReprint) {
+      r.huge(true).line('*** NACHDRUCK ***').huge(false);
+      r.line(new Date().toLocaleString('de-DE', { timeZone: 'Europe/Vienna' }));
+      r.separator('=');
+    }
+    r.line(`BESTELLUNG #${String(data.orderId).padStart(4, '0')}${splitSuffix}`)
       .line(`${tischLabel}  ${time}`)
       .line(`Kellner: ${data.waiterName}`);
     r.big(true).line(section).big(false);

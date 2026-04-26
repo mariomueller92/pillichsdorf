@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as billingApi from '@/api/billing.api';
 import * as tablesApi from '@/api/tables.api';
+import * as ordersApi from '@/api/orders.api';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
-import { ArrowLeft, Percent, Euro, AlertTriangle, Printer, Split, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, Percent, Euro, AlertTriangle, Printer, Split, Minus, Plus, X } from 'lucide-react';
 
 const DELIVERED_STATUS = 'serviert';
 const statusLabel: Record<string, string> = {
@@ -115,7 +116,18 @@ export function BillingScreen() {
     if (tischId) navigate(`/tisch/${tischId}`);
   };
 
-  const handleSplit = async () => {
+  const handleCancelItem = async (item: any) => {
+    if (!confirm(`Position "${item.quantity}x ${item.item_name}" stornieren?`)) return;
+    try {
+      await ordersApi.updateItemStatus(item.order_id, item.id, 'storniert');
+      toast.success('Position storniert');
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Storno fehlgeschlagen');
+    }
+  };
+
+  const handleSplit = async (withPrint: boolean) => {
     if (!tischId || selectedCount === 0) return;
     setSplitting(true);
     try {
@@ -124,9 +136,9 @@ export function BillingScreen() {
         items: Array.from(selected.entries()).map(([order_item_id, quantity]) => ({ order_item_id, quantity })),
         discount_type: discountType,
         discount_value: discountValue,
-        print_bon: true,
+        print_bon: withPrint,
       });
-      toast.success('Teilrechnung gedruckt');
+      toast.success(withPrint ? 'Teilrechnung gedruckt' : 'Teilrechnung gespeichert');
       const next = await reload();
       if (next && next.items.length === 0) {
         toast.success('Alle Positionen abgerechnet');
@@ -240,9 +252,21 @@ export function BillingScreen() {
                   {item.notes && <div className="text-xs text-slate-400">{item.notes}</div>}
                 </div>
               </div>
-              <span className="font-medium text-sm shrink-0">
-                {(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="font-medium text-sm">
+                  {(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;
+                </span>
+                {!splitMode && (
+                  <button
+                    type="button"
+                    onClick={() => handleCancelItem(item)}
+                    title="Stornieren"
+                    className="w-7 h-7 rounded-full border border-red-200 text-red-500 hover:bg-red-50 flex items-center justify-center"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -268,7 +292,7 @@ export function BillingScreen() {
             <div>
               <div className="text-sm font-medium">Teilrechnung: {selectedCount} Stück</div>
               <div className="text-xs text-slate-500">
-                Nach dem Drucken verschwinden diese Posten aus der Liste.
+                Nach dem Abrechnen verschwinden diese Posten aus der Liste.
               </div>
             </div>
             <div className="text-right">
@@ -276,26 +300,37 @@ export function BillingScreen() {
               <div className="font-bold">{selectedSubtotal.toFixed(2).replace('.', ',')} &euro;</div>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="md"
+                className="flex-1"
+                onClick={() => handleSplit(false)}
+                disabled={splitting || selectedCount === 0}
+              >
+                {splitting ? 'Wird gespeichert...' : 'Ohne Druck'}
+              </Button>
+              <Button
+                onClick={() => handleSplit(true)}
+                disabled={splitting || selectedCount === 0}
+                size="md"
+                variant="primary"
+                className="flex-1"
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <Printer size={16} />
+                  {splitting ? 'Wird gedruckt...' : 'Mit Druck'}
+                </span>
+              </Button>
+            </div>
             <Button
               variant="ghost"
-              size="md"
-              className="flex-1"
+              size="sm"
+              className="w-full"
               onClick={() => { setSplitMode(false); setSelected(new Map()); }}
             >
               Abbrechen
-            </Button>
-            <Button
-              onClick={handleSplit}
-              disabled={splitting || selectedCount === 0}
-              size="md"
-              variant="primary"
-              className="flex-1"
-            >
-              <span className="flex items-center justify-center gap-2">
-                <Printer size={16} />
-                {splitting ? 'Wird gedruckt...' : 'Teilrechnung drucken'}
-              </span>
             </Button>
           </div>
         </div>
