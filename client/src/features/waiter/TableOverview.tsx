@@ -15,6 +15,8 @@ export function TableOverview() {
 
   useEffect(() => {
     fetchTables().finally(() => setLoading(false));
+    const interval = setInterval(fetchTables, 8000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleTableClick = (table: Table) => {

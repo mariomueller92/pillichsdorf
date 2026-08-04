@@ -3,7 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { SocketProvider } from '@/socket/SocketProvider';
+import { useMenuStore } from '@/stores/menuStore';
+import { PrinterErrorWatcher } from '@/components/PrinterErrorWatcher';
 import { AuthGuard } from '@/guards/AuthGuard';
 import { RoleGuard } from '@/guards/RoleGuard';
 import { AppShell } from '@/components/layout/AppShell';
@@ -30,18 +31,28 @@ import { AdminOrders } from '@/features/admin/AdminOrders';
 
 export default function App() {
   const restore = useAuthStore(s => s.restore);
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
   const loadSettings = useSettingsStore(s => s.load);
+  const fetchMenu = useMenuStore(s => s.fetchMenu);
 
   useEffect(() => {
     restore();
     loadSettings();
   }, []);
 
+  // Ersetzt den frueheren "product:availability_changed"-Socket-Push: Menue-Aenderungen
+  // durch einen Admin/Schank-Chef erreichen andere Screens jetzt per Polling.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(fetchMenu, 20000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, fetchMenu]);
+
   return (
     <BrowserRouter>
-      <SocketProvider>
-        <Toaster position="top-center" richColors closeButton />
-        <Routes>
+      {isAuthenticated && <PrinterErrorWatcher />}
+      <Toaster position="top-center" richColors closeButton />
+      <Routes>
           <Route path="/login" element={<LoginPage />} />
 
           <Route element={<AuthGuard />}>
@@ -93,7 +104,6 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </SocketProvider>
     </BrowserRouter>
   );
 }

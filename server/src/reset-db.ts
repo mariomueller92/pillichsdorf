@@ -1,7 +1,11 @@
-import fs from 'fs';
-import path from 'path';
 import { config } from './config.js';
-import { runMigrations, seedDefaultData } from './database.js';
+import { runMigrations, seedDefaultData, execute } from './database.js';
+
+const ALL_TABLES = [
+  'bill_items', 'bills', 'order_items', 'orders', 'tables',
+  'menu_items', 'menu_categories', 'jeton_types', 'users',
+  'print_jobs', 'settings', 'applied_migrations',
+];
 
 async function resetDb(): Promise<void> {
   if (process.env.CONFIRM_RESET !== 'yes') {
@@ -9,38 +13,22 @@ async function resetDb(): Promise<void> {
     console.error('  ====================================================');
     console.error('  ACHTUNG: db:reset löscht die PRODUKTIVE Datenbank!');
     console.error('  ====================================================');
-    console.error(`  DB-Pfad: ${config.dbPath}`);
+    console.error(`  DB: ${config.databaseUrl.replace(/:[^:@]*@/, ':***@')}`);
     console.error('');
     console.error('  Um wirklich zurückzusetzen:');
     console.error('    CONFIRM_RESET=yes npm run db:reset');
     console.error('');
-    console.error('  Ein Backup der aktuellen DB wird vor dem Löschen');
-    console.error('  automatisch in <dbDir>/backups/ abgelegt.');
+    console.error('  Backups/Point-in-Time-Recovery übernimmt der Postgres-');
+    console.error('  Provider (z.B. Neon-Branches) — hier gibt es kein');
+    console.error('  automatisches Datei-Backup mehr.');
     console.error('');
     process.exit(1);
   }
 
-  const dbPath = config.dbPath;
-  const sideFiles = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  await runMigrations();
+  await execute(`TRUNCATE TABLE ${ALL_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  console.log('[DB] Alle Tabellen geleert');
 
-  // Sicherheitsnetz: Backup erzeugen BEVOR gelöscht wird
-  if (fs.existsSync(dbPath)) {
-    const backupDir = path.join(path.dirname(dbPath), 'backups');
-    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backup = path.join(backupDir, `pre-reset-${stamp}.db`);
-    fs.copyFileSync(dbPath, backup);
-    console.log(`[DB] Pre-Reset-Backup: ${backup}`);
-  }
-
-  for (const file of sideFiles) {
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-      console.log(`[DB] Datei geloescht: ${file}`);
-    }
-  }
-
-  runMigrations();
   await seedDefaultData();
 
   console.log('[DB] Reset abgeschlossen');

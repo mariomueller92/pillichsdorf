@@ -1,5 +1,7 @@
-import { buildReceipt, printRaw, isPrinterEnabled } from './index.js';
+import { buildReceipt } from './receipt.js';
 import { getSettings } from '../services/settings.service.js';
+import { queuePrintJob } from '../services/printJobs.service.js';
+import { config } from '../config.js';
 
 interface UnifiedBonItem {
   quantity: number;
@@ -42,10 +44,13 @@ const CUT_MARK_LINE = '- - - - - - - - - - - - - - - -';
  * - Top: SOFORT items (for bar/tray assembly)
  * - Tear zone with visible cut marks
  * - Bottom: KUECHE items with EXTRA LARGE table number
+ *
+ * Baut den Bon-Inhalt und legt ihn als print_jobs-Eintrag ab — die tatsaechliche
+ * Druckausfuehrung uebernimmt der lokale Print-Agent (server/src/print-agent/agent.ts).
  */
-export function printUnifiedBon(data: UnifiedBonData): boolean {
-  if (!isPrinterEnabled()) return false;
-
+export async function printUnifiedBon(data: UnifiedBonData): Promise<boolean> {
+  if (!config.printer.enabled) return false;
+  const settings = await getSettings();
   const time = new Date(data.createdAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Vienna' });
   const isBar = !data.tableNumber;
   const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
@@ -54,7 +59,7 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
   const sofortItems = data.items.filter(i => i.availability_mode === 'sofort');
   const kuecheItems = data.items.filter(i => i.availability_mode === 'lieferzeit');
 
-  const r = buildReceipt();
+  const r = buildReceipt(settings.printer_width);
 
   const printBigTableHeader = () => {
     // Barverkauf bzw. Kein-Tisch: prominent an den Kopf
@@ -134,23 +139,22 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
 
   r.feed(2).cut();
 
-  const ok = printRaw(r.toString());
-  if (ok) console.log(`[Drucker] Unified-Bon #${data.orderId} gedruckt (${sofortItems.length} sofort, ${kuecheItems.length} kueche)`);
-  return ok;
+  await queuePrintJob('bon', r.toString());
+  console.log(`[Drucker] Unified-Bon #${data.orderId} in Druck-Queue eingereiht (${sofortItems.length} sofort, ${kuecheItems.length} kueche)`);
+  return true;
 }
 
 /**
  * Bill Bon - printed when waiter clicks "Rechnung drucken"
  */
-export function printBillBon(data: BillBonData): boolean {
-  if (!isPrinterEnabled()) return false;
-
-  const settings = getSettings();
+export async function printBillBon(data: BillBonData): Promise<boolean> {
+  if (!config.printer.enabled) return false;
+  const settings = await getSettings();
   const now = new Date();
   const isBar = !data.tableNumber;
   const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
   const splitSuffix = data.splitPart ? `  (Teil ${data.splitPart.index}/${data.splitPart.total})` : '';
-  const r = buildReceipt();
+  const r = buildReceipt(settings.printer_width);
 
   // Company header
   r.center().bold(true).big(true)
@@ -245,7 +249,7 @@ export function printBillBon(data: BillBonData): boolean {
   r.center().line(CUT_MARK_LINE).line('>>>>  ABRISS  <<<<').line(CUT_MARK_LINE).left();
   r.feed(2).cut();
 
-  const ok = printRaw(r.toString());
-  if (ok) console.log('[Drucker] Abrechnungs-Bon gedruckt');
-  return ok;
+  await queuePrintJob('rechnung', r.toString());
+  console.log('[Drucker] Abrechnungs-Bon in Druck-Queue eingereiht');
+  return true;
 }

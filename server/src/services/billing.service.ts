@@ -1,6 +1,5 @@
-import { getDb } from '../database.js';
+import { queryOne, queryAll, withTransaction } from '../database.js';
 import { AppError } from '../middleware/errorHandler.js';
-import * as socketService from './socket.service.js';
 import { printBillBon } from '../printer/templates.js';
 import { JetonBreakdownEntry } from '../shared/types.js';
 
@@ -52,17 +51,14 @@ function computeJetonEquivalent(items: JetonEquivalentInput[]) {
   };
 }
 
-function getWaiterPaymentMode(waiterId: number): 'bargeld' | 'jeton' {
-  const db = getDb();
-  const waiter = db.prepare('SELECT payment_mode FROM users WHERE id = ?').get(waiterId) as any;
+async function getWaiterPaymentMode(waiterId: number): Promise<'bargeld' | 'jeton'> {
+  const waiter = await queryOne<{ payment_mode: string }>('SELECT payment_mode FROM users WHERE id = ?', [waiterId]);
   return waiter?.payment_mode === 'jeton' ? 'jeton' : 'bargeld';
 }
 
-export function getTableSummary(tableId: number) {
-  const db = getDb();
-
+export async function getTableSummary(tableId: number) {
   // Get all order items with remaining (not yet billed) quantity for this table
-  const items = db.prepare(`
+  const items = await queryAll<any>(`
     SELECT oi.id, oi.order_id, oi.menu_item_id,
            (oi.quantity - COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)) AS quantity,
            oi.unit_price, oi.notes, oi.status,
@@ -79,7 +75,7 @@ export function getTableSummary(tableId: number) {
       AND oi.status != 'storniert'
       AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
     ORDER BY o.created_at, oi.created_at
-  `).all(tableId) as any[];
+  `, [tableId]);
 
   const subtotal = items.reduce((sum: number, item: any) => sum + (item.unit_price * item.quantity), 0);
   const jeton = computeJetonEquivalent(items);
@@ -93,7 +89,7 @@ export function getTableSummary(tableId: number) {
   };
 }
 
-export function settleTable(
+export async function settleTable(
   tableId: number,
   waiterId: number,
   data: {
@@ -103,14 +99,13 @@ export function settleTable(
     print_bon?: boolean;
   }
 ) {
-  const db = getDb();
-  const summary = getTableSummary(tableId);
+  const summary = await getTableSummary(tableId);
 
   if (summary.items.length === 0) {
     throw new AppError(400, 'Keine offenen Posten für diesen Tisch');
   }
 
-  const paymentMode = getWaiterPaymentMode(waiterId);
+  const paymentMode = await getWaiterPaymentMode(waiterId);
   const jeton = paymentMode === 'jeton' ? computeJetonEquivalent(summary.items) : null;
   const baseSubtotal = jeton ? jeton.subtotal : summary.subtotal;
 
@@ -125,48 +120,46 @@ export function settleTable(
   }
   total = Math.round(Math.max(0, total) * 100) / 100;
 
-  const result = db.transaction(() => {
+  const billId = await withTransaction(async (tx) => {
     // Create bill
-    const billResult = db.prepare(`
+    const billRow = await tx.queryOne<{ id: number }>(`
       INSERT INTO bills (table_id, waiter_id, subtotal, discount_type, discount_value, total, payment_mode, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tableId, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `, [tableId, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null]);
 
-    const billId = billResult.lastInsertRowid as number;
+    const id = billRow!.id;
 
     // Create bill items
-    const insertBillItem = db.prepare(
-      'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)'
-    );
     for (const item of summary.items) {
-      insertBillItem.run(billId, item.id, item.quantity, item.unit_price);
+      await tx.execute(
+        'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)',
+        [id, item.id, item.quantity, item.unit_price]
+      );
     }
 
     // Mark all orders for this table as serviert
-    db.prepare(`
-      UPDATE orders SET status = 'serviert', updated_at = datetime('now')
+    await tx.execute(`
+      UPDATE orders SET status = 'serviert', updated_at = now()
       WHERE table_id = ? AND status IN ('offen', 'in_bearbeitung', 'fertig')
-    `).run(tableId);
+    `, [tableId]);
 
     // Mark fully-billed order items as serviert (status only, not quantity)
-    db.prepare(`
+    await tx.execute(`
       UPDATE order_items SET status = 'serviert'
       WHERE order_id IN (SELECT id FROM orders WHERE table_id = ?)
         AND status != 'storniert'
         AND quantity <= COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = order_items.id), 0)
-    `).run(tableId);
+    `, [tableId]);
 
-    return billId;
-  })();
+    return id;
+  });
 
-  const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(result) as any;
-
-  socketService.emitBillSettled({ billId: result, tableId, total });
+  const bill = await queryOne<any>('SELECT * FROM bills WHERE id = ?', [billId]);
 
   if (data.print_bon) {
-    const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
-    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
-    printBillBon({
+    const table = await queryOne<{ table_number: string }>('SELECT table_number FROM tables WHERE id = ?', [tableId]);
+    const waiter = await queryOne<{ display_name: string }>('SELECT display_name FROM users WHERE id = ?', [waiterId]);
+    await printBillBon({
       tableNumber: table?.table_number || null,
       barSlot: null,
       waiterName: waiter?.display_name || '',
@@ -184,21 +177,20 @@ export function settleTable(
   return { ...bill, jeton_breakdown: jeton?.breakdown ?? null, jeton_unassigned: jeton?.unassigned ?? null };
 }
 
-export function printBillForTable(tableId: number, waiterId: number) {
-  const db = getDb();
-  const summary = getTableSummary(tableId);
+export async function printBillForTable(tableId: number, waiterId: number) {
+  const summary = await getTableSummary(tableId);
   if (summary.items.length === 0) {
     throw new AppError(400, 'Keine offenen Posten für diesen Tisch');
   }
 
-  const paymentMode = getWaiterPaymentMode(waiterId);
+  const paymentMode = await getWaiterPaymentMode(waiterId);
   const jeton = paymentMode === 'jeton' ? computeJetonEquivalent(summary.items) : null;
   const baseSubtotal = jeton ? jeton.subtotal : summary.subtotal;
 
-  const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
-  const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
+  const table = await queryOne<{ table_number: string }>('SELECT table_number FROM tables WHERE id = ?', [tableId]);
+  const waiter = await queryOne<{ display_name: string }>('SELECT display_name FROM users WHERE id = ?', [waiterId]);
 
-  const ok = printBillBon({
+  const ok = await printBillBon({
     tableNumber: table?.table_number || null,
     barSlot: null,
     waiterName: waiter?.display_name || '',
@@ -212,11 +204,10 @@ export function printBillForTable(tableId: number, waiterId: number) {
     jetonUnassigned: jeton?.unassigned ?? null,
   });
 
-
   return { printed: ok, subtotal: baseSubtotal };
 }
 
-export function settleItems(
+export async function settleItems(
   tableId: number,
   waiterId: number,
   requested: Array<{ order_item_id: number; quantity: number }>,
@@ -227,8 +218,6 @@ export function settleItems(
     print_bon?: boolean;
   }
 ) {
-  const db = getDb();
-
   // Aggregate requested quantities (in case the same id appears twice)
   const wanted = new Map<number, number>();
   for (const r of requested) {
@@ -238,7 +227,7 @@ export function settleItems(
   const placeholders = ids.map(() => '?').join(',');
 
   // Load order items along with already-billed quantity
-  const rows = db.prepare(`
+  const rows = await queryAll<any>(`
     SELECT oi.id, oi.unit_price, oi.quantity AS total_quantity,
            COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0) AS billed_quantity,
            mi.name AS item_name,
@@ -250,7 +239,7 @@ export function settleItems(
     WHERE oi.id IN (${placeholders})
       AND o.table_id = ?
       AND oi.status != 'storniert'
-  `).all(...ids, tableId) as any[];
+  `, [...ids, tableId]);
 
   if (rows.length === 0) {
     throw new AppError(400, 'Keine gueltigen Posten gefunden');
@@ -276,7 +265,7 @@ export function settleItems(
     };
   });
 
-  const paymentMode = getWaiterPaymentMode(waiterId);
+  const paymentMode = await getWaiterPaymentMode(waiterId);
   const jeton = paymentMode === 'jeton' ? computeJetonEquivalent(billable) : null;
   const nominalSubtotal = billable.reduce((s, i) => s + i.unit_price * i.quantity, 0);
   const baseSubtotal = jeton ? jeton.subtotal : Math.round(nominalSubtotal * 100) / 100;
@@ -293,30 +282,31 @@ export function settleItems(
   }
   total = Math.round(Math.max(0, total) * 100) / 100;
 
-  const billId = db.transaction(() => {
-    const billResult = db.prepare(`
+  const billId = await withTransaction(async (tx) => {
+    const billRow = await tx.queryOne<{ id: number }>(`
       INSERT INTO bills (table_id, waiter_id, subtotal, discount_type, discount_value, total, payment_mode, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tableId, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+    `, [tableId, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null]);
 
-    const id = billResult.lastInsertRowid as number;
+    const id = billRow!.id;
 
-    const insertBillItem = db.prepare(
-      'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)'
-    );
-    const markServiert = db.prepare("UPDATE order_items SET status = 'serviert' WHERE id = ?");
     for (const item of billable) {
-      insertBillItem.run(id, item.order_item_id, item.quantity, item.unit_price);
-      if (item.fully_billed) markServiert.run(item.order_item_id);
+      await tx.execute(
+        'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)',
+        [id, item.order_item_id, item.quantity, item.unit_price]
+      );
+      if (item.fully_billed) {
+        await tx.execute("UPDATE order_items SET status = 'serviert' WHERE id = ?", [item.order_item_id]);
+      }
     }
 
     return id;
-  })();
+  });
 
   if (data.print_bon) {
-    const table = db.prepare('SELECT table_number FROM tables WHERE id = ?').get(tableId) as any;
-    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
-    printBillBon({
+    const table = await queryOne<{ table_number: string }>('SELECT table_number FROM tables WHERE id = ?', [tableId]);
+    const waiter = await queryOne<{ display_name: string }>('SELECT display_name FROM users WHERE id = ?', [waiterId]);
+    await printBillBon({
       tableNumber: table?.table_number || null,
       barSlot: null,
       waiterName: waiter?.display_name || '',
@@ -331,22 +321,21 @@ export function settleItems(
     });
   }
 
-  const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(billId) as any;
+  const bill = await queryOne<any>('SELECT * FROM bills WHERE id = ?', [billId]);
   return { ...bill, jeton_breakdown: jeton?.breakdown ?? null, jeton_unassigned: jeton?.unassigned ?? null };
 }
 
 // --- Order-based billing (for bar orders without table) ---
 
-export function getOrderSummary(orderId: number) {
-  const db = getDb();
-  const order = db.prepare(`
+export async function getOrderSummary(orderId: number) {
+  const order = await queryOne<any>(`
     SELECT o.*, u.display_name as waiter_name
     FROM orders o JOIN users u ON o.waiter_id = u.id
     WHERE o.id = ?
-  `).get(orderId) as any;
+  `, [orderId]);
   if (!order) throw new AppError(404, 'Bestellung nicht gefunden');
 
-  const items = db.prepare(`
+  const items = await queryAll<any>(`
     SELECT oi.id, oi.order_id, oi.menu_item_id,
            (oi.quantity - COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)) AS quantity,
            oi.unit_price, oi.notes, oi.status,
@@ -358,7 +347,7 @@ export function getOrderSummary(orderId: number) {
     ${JETON_ITEM_JOIN}
     WHERE oi.order_id = ? AND oi.status != 'storniert'
       AND oi.quantity > COALESCE((SELECT SUM(quantity) FROM bill_items WHERE order_item_id = oi.id), 0)
-  `).all(orderId) as any[];
+  `, [orderId]);
 
   const subtotal = items.reduce((sum: number, item: any) => sum + (item.unit_price * item.quantity), 0);
   const jeton = computeJetonEquivalent(items);
@@ -373,16 +362,15 @@ export function getOrderSummary(orderId: number) {
   };
 }
 
-export function settleOrder(
+export async function settleOrder(
   orderId: number,
   waiterId: number,
   data: { discount_type?: string | null; discount_value?: number; notes?: string | null; print_bon?: boolean }
 ) {
-  const db = getDb();
-  const summary = getOrderSummary(orderId);
+  const summary = await getOrderSummary(orderId);
   if (summary.items.length === 0) throw new AppError(400, 'Keine offenen Posten');
 
-  const paymentMode = getWaiterPaymentMode(waiterId);
+  const paymentMode = await getWaiterPaymentMode(waiterId);
   const jeton = paymentMode === 'jeton' ? computeJetonEquivalent(summary.items) : null;
   const baseSubtotal = jeton ? jeton.subtotal : summary.subtotal;
 
@@ -393,30 +381,33 @@ export function settleOrder(
   else if (discountType === 'fixed') total -= discountValue;
   total = Math.round(Math.max(0, total) * 100) / 100;
 
-  const order = db.prepare('SELECT table_id FROM orders WHERE id = ?').get(orderId) as any;
+  const order = await queryOne<{ table_id: number | null }>('SELECT table_id FROM orders WHERE id = ?', [orderId]);
 
-  const billId = db.transaction(() => {
-    const billResult = db.prepare(
-      'INSERT INTO bills (table_id, waiter_id, subtotal, discount_type, discount_value, total, payment_mode, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(order.table_id, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null);
-    const id = billResult.lastInsertRowid as number;
+  const billId = await withTransaction(async (tx) => {
+    const billRow = await tx.queryOne<{ id: number }>(
+      'INSERT INTO bills (table_id, waiter_id, subtotal, discount_type, discount_value, total, payment_mode, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [order!.table_id, waiterId, baseSubtotal, discountType, discountValue, total, paymentMode, data.notes || null]
+    );
+    const id = billRow!.id;
 
-    const ins = db.prepare('INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)');
-    for (const item of summary.items) ins.run(id, item.id, item.quantity, item.unit_price);
+    for (const item of summary.items) {
+      await tx.execute(
+        'INSERT INTO bill_items (bill_id, order_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)',
+        [id, item.id, item.quantity, item.unit_price]
+      );
+    }
 
-    db.prepare("UPDATE orders SET status = 'serviert', updated_at = datetime('now') WHERE id = ?").run(orderId);
-    db.prepare("UPDATE order_items SET status = 'serviert' WHERE order_id = ? AND status != 'storniert'").run(orderId);
+    await tx.execute("UPDATE orders SET status = 'serviert', updated_at = now() WHERE id = ?", [orderId]);
+    await tx.execute("UPDATE order_items SET status = 'serviert' WHERE order_id = ? AND status != 'storniert'", [orderId]);
 
     return id;
-  })();
-
-  socketService.emitBillSettled({ billId, orderId, total });
+  });
 
   // Print bill bon only if explicitly requested (Barverkauf: nicht automatisch)
   if (data.print_bon) {
-    const waiter = db.prepare('SELECT display_name FROM users WHERE id = ?').get(waiterId) as any;
-    const orderData = db.prepare('SELECT bar_slot FROM orders WHERE id = ?').get(orderId) as any;
-    printBillBon({
+    const waiter = await queryOne<{ display_name: string }>('SELECT display_name FROM users WHERE id = ?', [waiterId]);
+    const orderData = await queryOne<{ bar_slot: string | null }>('SELECT bar_slot FROM orders WHERE id = ?', [orderId]);
+    await printBillBon({
       tableNumber: null,
       barSlot: orderData?.bar_slot || null,
       waiterName: waiter?.display_name || '',
@@ -431,12 +422,11 @@ export function settleOrder(
     });
   }
 
-  const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(billId) as any;
+  const bill = await queryOne<any>('SELECT * FROM bills WHERE id = ?', [billId]);
   return { ...bill, jeton_breakdown: jeton?.breakdown ?? null, jeton_unassigned: jeton?.unassigned ?? null };
 }
 
-export function listBills(filters?: { date?: string; waiter_id?: number }) {
-  const db = getDb();
+export async function listBills(filters?: { date?: string; waiter_id?: number }) {
   let query = `
     SELECT b.*, u.display_name as waiter_name, t.table_number
     FROM bills b
@@ -456,22 +446,21 @@ export function listBills(filters?: { date?: string; waiter_id?: number }) {
   }
 
   query += ' ORDER BY b.created_at DESC';
-  return db.prepare(query).all(...params);
+  return queryAll(query, params);
 }
 
-export function getBill(id: number) {
-  const db = getDb();
-  const bill = db.prepare(`
+export async function getBill(id: number) {
+  const bill = await queryOne<any>(`
     SELECT b.*, u.display_name as waiter_name, t.table_number
     FROM bills b
     JOIN users u ON b.waiter_id = u.id
     LEFT JOIN tables t ON b.table_id = t.id
     WHERE b.id = ?
-  `).get(id) as any;
+  `, [id]);
 
   if (!bill) throw new AppError(404, 'Rechnung nicht gefunden');
 
-  const items = db.prepare(`
+  const items = await queryAll<any>(`
     SELECT bi.*, mi.name as item_name,
            ${JETON_ITEM_COLUMNS}
     FROM bill_items bi
@@ -479,7 +468,7 @@ export function getBill(id: number) {
     JOIN menu_items mi ON oi.menu_item_id = mi.id
     ${JETON_ITEM_JOIN}
     WHERE bi.bill_id = ?
-  `).all(id) as any[];
+  `, [id]);
 
   if (bill.payment_mode === 'jeton') {
     const jeton = computeJetonEquivalent(items);

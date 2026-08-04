@@ -6,23 +6,23 @@ import { auth } from '../middleware/auth.js';
 
 const router = Router();
 
-router.post('/login', validate(loginSchema), (req: Request, res: Response, next: NextFunction) => {
+router.post('/login', validate(loginSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = authService.loginWithCredentials(req.body.username, req.body.password);
+    const result = await authService.loginWithCredentials(req.body.username, req.body.password);
     res.json(result);
   } catch (err) { next(err); }
 });
 
-router.post('/login-pin', validate(pinLoginSchema), (req: Request, res: Response, next: NextFunction) => {
+router.post('/login-pin', validate(pinLoginSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = authService.loginWithPin(req.body.pin);
+    const result = await authService.loginWithPin(req.body.pin);
     res.json(result);
   } catch (err) { next(err); }
 });
 
-router.get('/me', auth, (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', auth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = authService.getUserFromToken(req.headers.authorization!.slice(7));
+    const user = await authService.getUserFromToken(req.headers.authorization!.slice(7));
     res.json(user);
   } catch (err) { next(err); }
 });

@@ -5,21 +5,23 @@ import * as statsService from '../services/stats.service.js';
 
 const router = Router();
 
-router.get('/', auth, role(['kueche_schank', 'admin']), (req: Request, res: Response) => {
-  const from = (req.query.from as string) || null;
-  const to = (req.query.to as string) || null;
-  const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit as string))) : 10;
-  res.json(statsService.getStatsBundle({ from, to }, limit));
+router.get('/', auth, role(['kueche_schank', 'admin']), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const from = (req.query.from as string) || null;
+    const to = (req.query.to as string) || null;
+    const limit = req.query.limit ? Math.max(1, Math.min(50, parseInt(req.query.limit as string))) : 10;
+    res.json(await statsService.getStatsBundle({ from, to }, limit));
+  } catch (err) { next(err); }
 });
 
 // Admin-only: Statistik zurücksetzen (alle Rechnungen, Bestellungen, Positionen löschen)
-router.post('/reset', auth, role(['admin']), (req: Request, res: Response, next: NextFunction) => {
+router.post('/reset', auth, role(['admin']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const confirm = req.body?.confirm;
     if (confirm !== 'RESET') {
       return res.status(400).json({ error: 'Bestätigung fehlt. Body muss { "confirm": "RESET" } enthalten.' });
     }
-    const result = statsService.resetAll();
+    const result = await statsService.resetAll();
     res.json({ ok: true, ...result });
   } catch (err) { next(err); }
 });

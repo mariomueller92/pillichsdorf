@@ -1,12 +1,12 @@
-import { getDb } from '../database.js';
+import { queryOne, execute } from '../database.js';
 import { Settings } from '../shared/types.js';
 
-export function getSettings(): Settings {
-  const settings = getDb().prepare('SELECT * FROM settings WHERE id = 1').get() as Settings;
-  return settings;
+export async function getSettings(): Promise<Settings> {
+  const settings = await queryOne<Settings>('SELECT * FROM settings WHERE id = 1');
+  return settings!;
 }
 
-export function updateSettings(data: Partial<Omit<Settings, 'id' | 'updated_at'>>): Settings {
+export async function updateSettings(data: Partial<Omit<Settings, 'id' | 'updated_at'>>): Promise<Settings> {
   const updates: string[] = [];
   const values: any[] = [];
 
@@ -19,8 +19,8 @@ export function updateSettings(data: Partial<Omit<Settings, 'id' | 'updated_at'>
   if (data.printer_width !== undefined) { updates.push('printer_width = ?'); values.push(data.printer_width); }
 
   if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
-    getDb().prepare(`UPDATE settings SET ${updates.join(', ')} WHERE id = 1`).run(...values);
+    updates.push('updated_at = now()');
+    await execute(`UPDATE settings SET ${updates.join(', ')} WHERE id = 1`, values);
   }
   return getSettings();
 }

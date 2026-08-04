@@ -9,14 +9,16 @@ const router = Router();
 
 router.use(auth, role(['admin']));
 
-router.get('/', (req: Request, res: Response) => {
-  const users = usersService.listUsers(req.query.role as string | undefined);
-  res.json(users);
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await usersService.listUsers(req.query.role as string | undefined);
+    res.json(users);
+  } catch (err) { next(err); }
 });
 
-router.get('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const user = usersService.getUser(parseInt(req.params.id));
+    const user = await usersService.getUser(parseInt(req.params.id));
     res.json(user);
   } catch (err) { next(err); }
 });
@@ -35,9 +37,9 @@ router.put('/:id', validate(updateUserSchema), async (req: Request, res: Respons
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    usersService.deleteUser(parseInt(req.params.id));
+    await usersService.deleteUser(parseInt(req.params.id));
     res.json({ success: true });
   } catch (err) { next(err); }
 });

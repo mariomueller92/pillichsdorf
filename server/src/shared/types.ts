@@ -22,7 +22,7 @@ export interface User {
   display_name: string;
   role: Role;
   payment_mode: PaymentMode;
-  is_active: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -33,7 +33,7 @@ export interface UserPublic {
   display_name: string;
   role: Role;
   payment_mode: PaymentMode;
-  is_active: number;
+  is_active: boolean;
 }
 
 export interface JetonType {
@@ -42,7 +42,7 @@ export interface JetonType {
   color: string;
   value: number;
   sort_order: number;
-  is_active: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -61,7 +61,7 @@ export interface MenuCategory {
   name: string;
   sort_order: number;
   target: CategoryTarget;
-  is_active: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -72,10 +72,10 @@ export interface MenuItem {
   name: string;
   price: number;
   sort_order: number;
-  is_available: number;
+  is_available: boolean;
   availability_mode: AvailabilityMode;
   jeton_type_id: number | null;
-  is_active: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -87,7 +87,7 @@ export interface Table {
   sort_order: number;
   status: TableStatus;
   merged_into_id: number | null;
-  is_active: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
   has_pending_items?: number;

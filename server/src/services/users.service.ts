@@ -1,25 +1,25 @@
 import bcrypt from 'bcrypt';
-import { getDb } from '../database.js';
+import { queryOne, queryAll, execute } from '../database.js';
 import { UserPublic } from '../shared/types.js';
 import { AppError } from '../middleware/errorHandler.js';
 
-export function listUsers(role?: string): UserPublic[] {
-  const db = getDb();
+export async function listUsers(role?: string): Promise<UserPublic[]> {
   if (role) {
-    return db.prepare(
-      'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE role = ? ORDER BY display_name'
-    ).all(role) as UserPublic[];
+    return queryAll<UserPublic>(
+      'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE role = ? ORDER BY display_name',
+      [role]
+    );
   }
-  return db.prepare(
+  return queryAll<UserPublic>(
     'SELECT id, username, display_name, role, payment_mode, is_active FROM users ORDER BY display_name'
-  ).all() as UserPublic[];
+  );
 }
 
-export function getUser(id: number): UserPublic {
-  const db = getDb();
-  const user = db.prepare(
-    'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE id = ?'
-  ).get(id) as UserPublic | undefined;
+export async function getUser(id: number): Promise<UserPublic> {
+  const user = await queryOne<UserPublic>(
+    'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE id = ?',
+    [id]
+  );
   if (!user) throw new AppError(404, 'Benutzer nicht gefunden');
   return user;
 }
@@ -32,22 +32,20 @@ export async function createUser(data: {
   role: string;
   payment_mode?: string;
 }): Promise<UserPublic> {
-  const db = getDb();
-
   const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : null;
   const pinHash = data.pin ? await bcrypt.hash(data.pin, 10) : null;
   // Kassa-SPK gibt ausschliesslich Jetons aus - Zahlungsart ist kein Nutzer-Setting
   const paymentMode = data.role === 'kassa_spk' ? 'jeton' : (data.payment_mode || 'bargeld');
 
   try {
-    const result = db.prepare(`
+    const row = await queryOne<{ id: number }>(`
       INSERT INTO users (username, password_hash, pin_hash, display_name, role, payment_mode)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(data.username || null, passwordHash, pinHash, data.display_name, data.role, paymentMode);
+      VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+    `, [data.username || null, passwordHash, pinHash, data.display_name, data.role, paymentMode]);
 
-    return getUser(result.lastInsertRowid as number);
+    return getUser(row!.id);
   } catch (err: any) {
-    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    if (err.code === '23505') {
       throw new AppError(409, 'Benutzername bereits vergeben');
     }
     throw err;
@@ -61,10 +59,9 @@ export async function updateUser(id: number, data: {
   display_name?: string;
   role?: string;
   payment_mode?: string;
-  is_active?: number;
+  is_active?: boolean;
 }): Promise<UserPublic> {
-  const db = getDb();
-  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as { role: string; payment_mode: string } | undefined;
+  const existing = await queryOne<{ role: string; payment_mode: string }>('SELECT * FROM users WHERE id = ?', [id]);
   if (!existing) throw new AppError(404, 'Benutzer nicht gefunden');
 
   const updates: string[] = [];
@@ -106,12 +103,12 @@ export async function updateUser(id: number, data: {
   }
 
   if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
+    updates.push('updated_at = now()');
     values.push(id);
     try {
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      await execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
     } catch (err: any) {
-      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      if (err.code === '23505') {
         throw new AppError(409, 'Benutzername bereits vergeben');
       }
       throw err;
@@ -121,8 +118,7 @@ export async function updateUser(id: number, data: {
   return getUser(id);
 }
 
-export function deleteUser(id: number): void {
-  const db = getDb();
-  const result = db.prepare("UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
-  if (result.changes === 0) throw new AppError(404, 'Benutzer nicht gefunden');
+export async function deleteUser(id: number): Promise<void> {
+  const result = await execute("UPDATE users SET is_active = false, updated_at = now() WHERE id = ?", [id]);
+  if (result.rowCount === 0) throw new AppError(404, 'Benutzer nicht gefunden');
 }

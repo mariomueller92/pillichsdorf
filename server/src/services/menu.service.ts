@@ -1,29 +1,30 @@
-import { getDb } from '../database.js';
+import { queryOne, queryAll, execute } from '../database.js';
 import { MenuCategory, MenuItem } from '../shared/types.js';
 import { AppError } from '../middleware/errorHandler.js';
 
 // Categories
-export function listCategories(): MenuCategory[] {
-  return getDb().prepare(
-    'SELECT * FROM menu_categories WHERE is_active = 1 ORDER BY sort_order, name'
-  ).all() as MenuCategory[];
+export async function listCategories(): Promise<MenuCategory[]> {
+  return queryAll<MenuCategory>(
+    'SELECT * FROM menu_categories WHERE is_active = true ORDER BY sort_order, name'
+  );
 }
 
-export function getCategory(id: number): MenuCategory {
-  const cat = getDb().prepare('SELECT * FROM menu_categories WHERE id = ?').get(id) as MenuCategory | undefined;
+export async function getCategory(id: number): Promise<MenuCategory> {
+  const cat = await queryOne<MenuCategory>('SELECT * FROM menu_categories WHERE id = ?', [id]);
   if (!cat) throw new AppError(404, 'Kategorie nicht gefunden');
   return cat;
 }
 
-export function createCategory(data: { name: string; sort_order: number; target: string }): MenuCategory {
-  const result = getDb().prepare(
-    'INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?)'
-  ).run(data.name, data.sort_order, data.target);
-  return getCategory(result.lastInsertRowid as number);
+export async function createCategory(data: { name: string; sort_order: number; target: string }): Promise<MenuCategory> {
+  const row = await queryOne<{ id: number }>(
+    'INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?) RETURNING id',
+    [data.name, data.sort_order, data.target]
+  );
+  return getCategory(row!.id);
 }
 
-export function updateCategory(id: number, data: Partial<MenuCategory>): MenuCategory {
-  const existing = getCategory(id);
+export async function updateCategory(id: number, data: Partial<MenuCategory>): Promise<MenuCategory> {
+  await getCategory(id); // verify exists
   const updates: string[] = [];
   const values: any[] = [];
 
@@ -33,46 +34,48 @@ export function updateCategory(id: number, data: Partial<MenuCategory>): MenuCat
   if (data.is_active !== undefined) { updates.push('is_active = ?'); values.push(data.is_active); }
 
   if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
+    updates.push('updated_at = now()');
     values.push(id);
-    getDb().prepare(`UPDATE menu_categories SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await execute(`UPDATE menu_categories SET ${updates.join(', ')} WHERE id = ?`, values);
   }
   return getCategory(id);
 }
 
-export function deleteCategory(id: number): void {
-  const result = getDb().prepare("UPDATE menu_categories SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
-  if (result.changes === 0) throw new AppError(404, 'Kategorie nicht gefunden');
+export async function deleteCategory(id: number): Promise<void> {
+  const result = await execute("UPDATE menu_categories SET is_active = false, updated_at = now() WHERE id = ?", [id]);
+  if (result.rowCount === 0) throw new AppError(404, 'Kategorie nicht gefunden');
 }
 
 // Items
-export function listItems(categoryId?: number): MenuItem[] {
+export async function listItems(categoryId?: number): Promise<MenuItem[]> {
   if (categoryId) {
-    return getDb().prepare(
-      'SELECT * FROM menu_items WHERE category_id = ? AND is_active = 1 ORDER BY sort_order, name'
-    ).all(categoryId) as MenuItem[];
+    return queryAll<MenuItem>(
+      'SELECT * FROM menu_items WHERE category_id = ? AND is_active = true ORDER BY sort_order, name',
+      [categoryId]
+    );
   }
-  return getDb().prepare(
-    'SELECT * FROM menu_items WHERE is_active = 1 ORDER BY sort_order, name'
-  ).all() as MenuItem[];
+  return queryAll<MenuItem>(
+    'SELECT * FROM menu_items WHERE is_active = true ORDER BY sort_order, name'
+  );
 }
 
-export function getItem(id: number): MenuItem {
-  const item = getDb().prepare('SELECT * FROM menu_items WHERE id = ?').get(id) as MenuItem | undefined;
+export async function getItem(id: number): Promise<MenuItem> {
+  const item = await queryOne<MenuItem>('SELECT * FROM menu_items WHERE id = ?', [id]);
   if (!item) throw new AppError(404, 'Artikel nicht gefunden');
   return item;
 }
 
-export function createItem(data: { category_id: number; name: string; price: number; sort_order: number; jeton_type_id?: number | null }): MenuItem {
-  getCategory(data.category_id); // verify category exists
-  const result = getDb().prepare(
-    'INSERT INTO menu_items (category_id, name, price, sort_order, jeton_type_id) VALUES (?, ?, ?, ?, ?)'
-  ).run(data.category_id, data.name, data.price, data.sort_order, data.jeton_type_id ?? null);
-  return getItem(result.lastInsertRowid as number);
+export async function createItem(data: { category_id: number; name: string; price: number; sort_order: number; jeton_type_id?: number | null }): Promise<MenuItem> {
+  await getCategory(data.category_id); // verify category exists
+  const row = await queryOne<{ id: number }>(
+    'INSERT INTO menu_items (category_id, name, price, sort_order, jeton_type_id) VALUES (?, ?, ?, ?, ?) RETURNING id',
+    [data.category_id, data.name, data.price, data.sort_order, data.jeton_type_id ?? null]
+  );
+  return getItem(row!.id);
 }
 
-export function updateItem(id: number, data: Partial<MenuItem>): MenuItem {
-  getItem(id); // verify exists
+export async function updateItem(id: number, data: Partial<MenuItem>): Promise<MenuItem> {
+  await getItem(id); // verify exists
   const updates: string[] = [];
   const values: any[] = [];
 
@@ -86,28 +89,27 @@ export function updateItem(id: number, data: Partial<MenuItem>): MenuItem {
   if (data.jeton_type_id !== undefined) { updates.push('jeton_type_id = ?'); values.push(data.jeton_type_id); }
 
   if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
+    updates.push('updated_at = now()');
     values.push(id);
-    getDb().prepare(`UPDATE menu_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await execute(`UPDATE menu_items SET ${updates.join(', ')} WHERE id = ?`, values);
   }
   return getItem(id);
 }
 
-export function deleteItem(id: number): void {
-  const result = getDb().prepare("UPDATE menu_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
-  if (result.changes === 0) throw new AppError(404, 'Artikel nicht gefunden');
+export async function deleteItem(id: number): Promise<void> {
+  const result = await execute("UPDATE menu_items SET is_active = false, updated_at = now() WHERE id = ?", [id]);
+  if (result.rowCount === 0) throw new AppError(404, 'Artikel nicht gefunden');
 }
 
-export function toggleAvailability(id: number): MenuItem {
-  const item = getItem(id);
-  const newAvail = item.is_available ? 0 : 1;
-  getDb().prepare("UPDATE menu_items SET is_available = ?, updated_at = datetime('now') WHERE id = ?").run(newAvail, id);
+export async function toggleAvailability(id: number): Promise<MenuItem> {
+  const item = await getItem(id);
+  await execute("UPDATE menu_items SET is_available = ?, updated_at = now() WHERE id = ?", [!item.is_available, id]);
   return getItem(id);
 }
 
-export function toggleAvailabilityMode(id: number): MenuItem {
-  const item = getItem(id);
-  const newMode = (item as any).availability_mode === 'sofort' ? 'lieferzeit' : 'sofort';
-  getDb().prepare("UPDATE menu_items SET availability_mode = ?, updated_at = datetime('now') WHERE id = ?").run(newMode, id);
+export async function toggleAvailabilityMode(id: number): Promise<MenuItem> {
+  const item = await getItem(id);
+  const newMode = item.availability_mode === 'sofort' ? 'lieferzeit' : 'sofort';
+  await execute("UPDATE menu_items SET availability_mode = ?, updated_at = now() WHERE id = ?", [newMode, id]);
   return getItem(id);
 }

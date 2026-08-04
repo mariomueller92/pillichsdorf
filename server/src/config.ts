@@ -5,16 +5,6 @@ import path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '../..');
 dotenv.config({ path: path.resolve(REPO_ROOT, '.env') });
 
-// DB-Pfad CWD-unabhängig auflösen:
-// Relative Pfade werden IMMER gegen den Repo-Root aufgelöst,
-// damit die DB unabhängig davon, ob der Server aus /, /server oder
-// sonstwo gestartet wird, immer am gleichen Ort liegt.
-function resolveDbPath(): string {
-  const raw = process.env.DB_PATH;
-  if (!raw) return path.resolve(REPO_ROOT, 'server/data/pillichsdorf.db');
-  return path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
-}
-
 // Firmenname/-adresse, Bon-Footer sowie Drucker-Name/-Breite sind seit der
 // Mehrmandanten-Umstellung admin-editierbar in der DB (Tabelle "settings",
 // siehe settings.service.ts) statt statisch aus .env. Die COMPANY_*/PRINTER_NAME/
@@ -25,9 +15,10 @@ export const config = {
   host: process.env.HOST || '0.0.0.0',
   jwtSecret: process.env.JWT_SECRET || 'change-me',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
-  dbPath: resolveDbPath(),
+  databaseUrl: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/pillichsdorf',
   printer: {
     enabled: process.env.PRINTER_ENABLED === 'true',
   },
+  printAgentToken: process.env.PRINT_AGENT_TOKEN || 'change-me',
   logLevel: process.env.LOG_LEVEL || 'info',
 };

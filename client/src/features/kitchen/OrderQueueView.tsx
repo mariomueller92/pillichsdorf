@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOrdersStore } from '@/stores/ordersStore';
 import * as ordersApi from '@/api/orders.api';
 import { Order, OrderItemWithDetails, CategoryTarget } from '@/types';
@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
 import { Check, ChefHat, Clock } from 'lucide-react';
 import { formatDbTimeHM } from '@/utils/time';
+import { playNotificationSound } from '@/utils/notificationSound';
 
 interface OrderQueueViewProps {
   target: CategoryTarget;
@@ -17,10 +18,27 @@ interface OrderQueueViewProps {
 export function OrderQueueView({ target, title }: OrderQueueViewProps) {
   const { activeOrders, fetchActiveOrders } = useOrdersStore();
   const [loading, setLoading] = useState(true);
+  const seenNeuItemIds = useRef<Set<number> | null>(null);
 
   useEffect(() => {
-    fetchActiveOrders(target).finally(() => setLoading(false));
-    const interval = setInterval(() => fetchActiveOrders(target), 15000);
+    const poll = async () => {
+      await fetchActiveOrders(target);
+      // Ersetzt den frueheren "order:new"-Socket-Push: neu aufgetauchte "neu"-Positionen
+      // (neue Bestellung ODER neue Position auf bestehender Bestellung) loesen den Ton aus.
+      const neuIds = new Set(
+        useOrdersStore.getState().activeOrders
+          .flatMap(o => o.items ?? [])
+          .filter(i => i.category_target === target && i.status === 'neu')
+          .map(i => i.id)
+      );
+      if (seenNeuItemIds.current !== null) {
+        const hasNew = [...neuIds].some(id => !seenNeuItemIds.current!.has(id));
+        if (hasNew) playNotificationSound();
+      }
+      seenNeuItemIds.current = neuIds;
+    };
+    poll().finally(() => setLoading(false));
+    const interval = setInterval(poll, 15000);
     return () => clearInterval(interval);
   }, [target]);
 

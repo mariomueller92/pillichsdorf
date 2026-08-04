@@ -1,73 +1,77 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { Pool, PoolClient, types } from 'pg';
 import bcrypt from 'bcrypt';
 import { config } from './config.js';
 
-let db: Database.Database;
+// Postgres liefert bigint (COUNT) und numeric (SUM/AVG über INTEGER-Spalten) standardmäßig
+// als Strings, um Präzisionsverlust bei sehr großen Werten zu vermeiden. Für diese App
+// (Restaurantbetrieb, keine astronomischen Summen) ist das unnötig und würde an sehr vielen
+// Aggregat-Stellen (COUNT/SUM in Subqueries) stillschweigend Zahlen-Arithmetik brechen.
+types.setTypeParser(20 /* int8 */, (val) => parseInt(val, 10));
+types.setTypeParser(1700 /* numeric */, (val) => parseFloat(val));
 
-export function getDb(): Database.Database {
-  if (!db) {
-    const dir = path.dirname(config.dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    db = new Database(config.dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+let pool: Pool;
+
+export function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({ connectionString: config.databaseUrl });
   }
-  return db;
+  return pool;
 }
 
-/**
- * Erzeugt einen Snapshot der DB vor jeder Migration.
- * Backup landet in <dbDir>/backups/pillichsdorf-<ISO-Zeitstempel>.db.
- * Beibehalten: letzte 20 Backups, ältere werden gelöscht.
- *
- * Wichtig: Das online-Backup-API von better-sqlite3 liest die DB inklusive
- * aktuellem WAL, d.h. auch nicht-checkpointete Writes werden korrekt gesichert.
- */
-function backupBeforeMigration(): void {
-  if (!fs.existsSync(config.dbPath)) return; // Erster Start – nichts zu sichern
+type Queryable = Pool | PoolClient;
 
-  const dbDir = path.dirname(config.dbPath);
-  const backupDir = path.join(dbDir, 'backups');
-  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+/** Übersetzt SQLite-Stil `?`-Platzhalter (in Reihenfolge) nach Postgres `$1, $2, ...`. */
+function toPositional(sql: string): string {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
+}
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const target = path.join(backupDir, `pillichsdorf-${stamp}.db`);
+export async function queryAll<T = any>(sql: string, params: any[] = [], client: Queryable = getPool()): Promise<T[]> {
+  const res = await client.query(toPositional(sql), params);
+  return res.rows as T[];
+}
 
+export async function queryOne<T = any>(sql: string, params: any[] = [], client: Queryable = getPool()): Promise<T | undefined> {
+  const rows = await queryAll<T>(sql, params, client);
+  return rows[0];
+}
+
+export async function execute(sql: string, params: any[] = [], client: Queryable = getPool()): Promise<{ rowCount: number }> {
+  const res = await client.query(toPositional(sql), params);
+  return { rowCount: res.rowCount ?? 0 };
+}
+
+export interface Tx {
+  queryAll<T = any>(sql: string, params?: any[]): Promise<T[]>;
+  queryOne<T = any>(sql: string, params?: any[]): Promise<T | undefined>;
+  execute(sql: string, params?: any[]): Promise<{ rowCount: number }>;
+}
+
+/** Ersetzt das synchrone `db.transaction(fn)()`-Muster von better-sqlite3. */
+export async function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
   try {
-    const source = new Database(config.dbPath, { readonly: true });
-    // Synchrones Backup via VACUUM INTO — inkludiert WAL-Inhalt
-    source.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
-    source.close();
-    console.log(`[DB] Backup erstellt: ${target}`);
+    await client.query('BEGIN');
+    const tx: Tx = {
+      queryAll: (sql, params = []) => queryAll(sql, params, client),
+      queryOne: (sql, params = []) => queryOne(sql, params, client),
+      execute: (sql, params = []) => execute(sql, params, client),
+    };
+    const result = await fn(tx);
+    await client.query('COMMIT');
+    return result;
   } catch (err) {
-    console.error('[DB] Backup fehlgeschlagen:', err);
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-
-  // Aufräumen: nur 20 jüngste Backups behalten
-  try {
-    const files = fs.readdirSync(backupDir)
-      .filter(f => f.startsWith('pillichsdorf-') && f.endsWith('.db'))
-      .map(f => ({ name: f, path: path.join(backupDir, f), mtime: fs.statSync(path.join(backupDir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    for (const old of files.slice(20)) {
-      fs.unlinkSync(old.path);
-    }
-  } catch { /* ignore cleanup errors */ }
 }
 
-export function runMigrations(): void {
-  // Immer zuerst Snapshot ziehen — so gehen bei keiner Schema-Änderung Daten verloren.
-  backupBeforeMigration();
-
-  const database = getDb();
-
-  database.exec(`
+export async function runMigrations(): Promise<void> {
+  await execute(`
     CREATE TABLE IF NOT EXISTS users (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       username        TEXT    UNIQUE,
       password_hash   TEXT,
       pin_hash        TEXT,
@@ -75,107 +79,107 @@ export function runMigrations(): void {
       role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner', 'kassa_spk')),
       payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
                       CHECK (payment_mode IN ('bargeld', 'jeton')),
-      is_active       INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS jeton_types (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       name            TEXT    NOT NULL,
       color           TEXT    NOT NULL,
-      value           REAL    NOT NULL CHECK (value >= 0),
+      value           DOUBLE PRECISION NOT NULL CHECK (value >= 0),
       sort_order      INTEGER NOT NULL DEFAULT 0,
-      is_active       INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS menu_categories (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       name            TEXT    NOT NULL,
       sort_order      INTEGER NOT NULL DEFAULT 0,
       target          TEXT    NOT NULL DEFAULT 'kueche'
                       CHECK (target IN ('kueche', 'schank')),
-      is_active       INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS menu_items (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       category_id     INTEGER NOT NULL REFERENCES menu_categories(id) ON DELETE RESTRICT,
       name            TEXT    NOT NULL,
-      price           REAL    NOT NULL CHECK (price >= 0),
+      price           DOUBLE PRECISION NOT NULL CHECK (price >= 0),
       sort_order      INTEGER NOT NULL DEFAULT 0,
-      is_available    INTEGER NOT NULL DEFAULT 1,
+      is_available    BOOLEAN NOT NULL DEFAULT true,
       availability_mode TEXT  NOT NULL DEFAULT 'sofort'
                       CHECK (availability_mode IN ('sofort', 'lieferzeit')),
       jeton_type_id   INTEGER REFERENCES jeton_types(id) ON DELETE SET NULL,
-      is_active       INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS tables (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       table_number    TEXT    NOT NULL UNIQUE,
       capacity        INTEGER,
       sort_order      INTEGER NOT NULL DEFAULT 0,
       status          TEXT    NOT NULL DEFAULT 'frei'
                       CHECK (status IN ('frei', 'besetzt')),
       merged_into_id  INTEGER REFERENCES tables(id) ON DELETE SET NULL,
-      is_active       INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      is_active       BOOLEAN NOT NULL DEFAULT true,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS orders (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       table_id        INTEGER REFERENCES tables(id) ON DELETE SET NULL,
       bar_slot        TEXT,
       waiter_id       INTEGER NOT NULL REFERENCES users(id),
       status          TEXT    NOT NULL DEFAULT 'offen'
                       CHECK (status IN ('offen', 'in_bearbeitung', 'fertig', 'serviert', 'storniert')),
       notes           TEXT,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS order_items (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       order_id        INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
       menu_item_id    INTEGER NOT NULL REFERENCES menu_items(id),
       quantity        INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
-      unit_price      REAL    NOT NULL,
+      unit_price      DOUBLE PRECISION NOT NULL,
       notes           TEXT,
       status          TEXT    NOT NULL DEFAULT 'neu'
                       CHECK (status IN ('neu', 'in_zubereitung', 'fertig', 'serviert', 'storniert')),
       acknowledged_by INTEGER REFERENCES users(id),
-      acknowledged_at TEXT,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      acknowledged_at TIMESTAMPTZ,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS bills (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       table_id        INTEGER REFERENCES tables(id),
       waiter_id       INTEGER NOT NULL REFERENCES users(id),
-      subtotal        REAL    NOT NULL,
+      subtotal        DOUBLE PRECISION NOT NULL,
       discount_type   TEXT    CHECK (discount_type IN ('percentage', 'fixed')),
-      discount_value  REAL    DEFAULT 0,
-      total           REAL    NOT NULL,
+      discount_value  DOUBLE PRECISION DEFAULT 0,
+      total           DOUBLE PRECISION NOT NULL,
       payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
                       CHECK (payment_mode IN ('bargeld', 'jeton')),
       notes           TEXT,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS bill_items (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       bill_id         INTEGER NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
       order_item_id   INTEGER NOT NULL REFERENCES order_items(id),
       quantity        INTEGER NOT NULL DEFAULT 1,
-      unit_price      REAL    NOT NULL
+      unit_price      DOUBLE PRECISION NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -187,10 +191,27 @@ export function runMigrations(): void {
       company_footer          TEXT    NOT NULL DEFAULT 'Vielen Dank!',
       printer_name             TEXT   NOT NULL DEFAULT 'Knub Thermica',
       printer_width            INTEGER NOT NULL DEFAULT 58,
-      updated_at              TEXT    NOT NULL DEFAULT (datetime('now'))
+      updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS print_jobs (
+      id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      type            TEXT    NOT NULL CHECK (type IN ('bon', 'rechnung')),
+      rendered_content TEXT   NOT NULL,
+      status          TEXT    NOT NULL DEFAULT 'pending'
+                      CHECK (status IN ('pending', 'done', 'failed')),
+      error_message   TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+      completed_at    TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS applied_migrations (
+      name        TEXT PRIMARY KEY,
+      applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE INDEX IF NOT EXISTS idx_menu_items_category ON menu_items(category_id);
+    CREATE INDEX IF NOT EXISTS idx_menu_items_jeton_type ON menu_items(jeton_type_id);
     CREATE INDEX IF NOT EXISTS idx_orders_table ON orders(table_id);
     CREATE INDEX IF NOT EXISTS idx_orders_waiter ON orders(waiter_id);
     CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
@@ -198,140 +219,17 @@ export function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_order_items_status ON order_items(status);
     CREATE INDEX IF NOT EXISTS idx_bills_table ON bills(table_id);
     CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
+    CREATE INDEX IF NOT EXISTS idx_print_jobs_status ON print_jobs(status);
   `);
 
-  // ----------------------------------------------------------------
-  // INKREMENTELLE MIGRATIONEN für bestehende (produktive) DBs
-  // ----------------------------------------------------------------
-  //
-  // WICHTIG für zukünftige Schema-Änderungen: Die produktive DB darf
-  // NIEMALS gelöscht oder neu erstellt werden. Stattdessen:
-  //
-  //   1. Tabelle existiert schon? → CREATE TABLE IF NOT EXISTS (oben).
-  //   2. Neue Spalte? → mit PRAGMA table_info() prüfen, dann ALTER TABLE ADD COLUMN.
-  //   3. Spaltentyp ändern / Spalte entfernen? → neuer Pattern:
-  //        a) CREATE TABLE <name>_new mit neuem Schema
-  //        b) INSERT INTO <name>_new SELECT ... FROM <name> (Daten migrieren!)
-  //        c) DROP TABLE <name>
-  //        d) ALTER TABLE <name>_new RENAME TO <name>
-  //      Alles in einer Transaktion. Vor jeder Ausführung prüfen, ob die
-  //      Änderung schon angewendet wurde (idempotent machen).
-  //   4. Neue Tabelle? → CREATE TABLE IF NOT EXISTS oben ergänzen.
-  //   5. NIEMALS TRUNCATE / DELETE FROM / DROP ohne Daten-Migration.
-  //
-  // Ein automatisches Backup wird VOR jeder Migration in
-  // <dbDir>/backups/ angelegt — siehe backupBeforeMigration().
-  // ----------------------------------------------------------------
-
-  const tableCols = database.prepare("PRAGMA table_info(tables)").all() as { name: string }[];
-  if (!tableCols.some(c => c.name === 'sort_order')) {
-    database.exec("ALTER TABLE tables ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0");
-    console.log('[DB] Migration: Spalte tables.sort_order hinzugefuegt');
-  }
-
-  const menuItemCols = database.prepare("PRAGMA table_info(menu_items)").all() as { name: string }[];
-  if (!menuItemCols.some(c => c.name === 'availability_mode')) {
-    database.exec("ALTER TABLE menu_items ADD COLUMN availability_mode TEXT NOT NULL DEFAULT 'sofort' CHECK (availability_mode IN ('sofort', 'lieferzeit'))");
-    console.log('[DB] Migration: Spalte menu_items.availability_mode hinzugefügt');
-  }
-  if (!menuItemCols.some(c => c.name === 'jeton_type_id')) {
-    database.exec("ALTER TABLE menu_items ADD COLUMN jeton_type_id INTEGER REFERENCES jeton_types(id) ON DELETE SET NULL");
-    database.exec("CREATE INDEX IF NOT EXISTS idx_menu_items_jeton_type ON menu_items(jeton_type_id)");
-    console.log('[DB] Migration: Spalte menu_items.jeton_type_id hinzugefügt');
-  }
-
-  const userCols = database.prepare("PRAGMA table_info(users)").all() as { name: string }[];
-  if (!userCols.some(c => c.name === 'payment_mode')) {
-    database.exec("ALTER TABLE users ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'bargeld' CHECK (payment_mode IN ('bargeld', 'jeton'))");
-    console.log('[DB] Migration: Spalte users.payment_mode hinzugefügt');
-  }
-
-  // CHECK-Constraint auf users.role erweitern um 'schank_kellner' (SQLite kann CHECKs
-  // nicht per ALTER TABLE ändern -> Tabelle nach dokumentiertem Muster neu aufbauen).
-  const usersTableDef = database.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
-  ).get() as { sql: string } | undefined;
-  if (usersTableDef && !usersTableDef.sql.includes('schank_kellner')) {
-    database.pragma('foreign_keys = OFF');
-    database.transaction(() => {
-      database.exec(`
-        CREATE TABLE users_new (
-          id              INTEGER PRIMARY KEY AUTOINCREMENT,
-          username        TEXT    UNIQUE,
-          password_hash   TEXT,
-          pin_hash        TEXT,
-          display_name    TEXT    NOT NULL,
-          role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner')),
-          payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
-                          CHECK (payment_mode IN ('bargeld', 'jeton')),
-          is_active       INTEGER NOT NULL DEFAULT 1,
-          created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-          updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO users_new (id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at)
-          SELECT id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at FROM users;
-        DROP TABLE users;
-        ALTER TABLE users_new RENAME TO users;
-      `);
-    })();
-    const fkIssues = database.prepare('PRAGMA foreign_key_check').all();
-    if (fkIssues.length > 0) {
-      throw new Error('[DB] Migration users.role-CHECK: Fremdschlüssel-Inkonsistenz nach Rebuild: ' + JSON.stringify(fkIssues));
-    }
-    database.pragma('foreign_keys = ON');
-    console.log("[DB] Migration: users.role-CHECK um 'schank_kellner' erweitert");
-  }
-
-  // CHECK-Constraint auf users.role erweitern um 'kassa_spk' (gleiches Muster wie oben).
-  const usersTableDef2 = database.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
-  ).get() as { sql: string } | undefined;
-  if (usersTableDef2 && !usersTableDef2.sql.includes('kassa_spk')) {
-    database.pragma('foreign_keys = OFF');
-    database.transaction(() => {
-      database.exec(`
-        CREATE TABLE users_new (
-          id              INTEGER PRIMARY KEY AUTOINCREMENT,
-          username        TEXT    UNIQUE,
-          password_hash   TEXT,
-          pin_hash        TEXT,
-          display_name    TEXT    NOT NULL,
-          role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner', 'kassa_spk')),
-          payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
-                          CHECK (payment_mode IN ('bargeld', 'jeton')),
-          is_active       INTEGER NOT NULL DEFAULT 1,
-          created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-          updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO users_new (id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at)
-          SELECT id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at FROM users;
-        DROP TABLE users;
-        ALTER TABLE users_new RENAME TO users;
-      `);
-    })();
-    const fkIssues2 = database.prepare('PRAGMA foreign_key_check').all();
-    if (fkIssues2.length > 0) {
-      throw new Error('[DB] Migration users.role-CHECK (kassa_spk): Fremdschlüssel-Inkonsistenz nach Rebuild: ' + JSON.stringify(fkIssues2));
-    }
-    database.pragma('foreign_keys = ON');
-    console.log("[DB] Migration: users.role-CHECK um 'kassa_spk' erweitert");
-  }
-
-  const billCols = database.prepare("PRAGMA table_info(bills)").all() as { name: string }[];
-  if (!billCols.some(c => c.name === 'payment_mode')) {
-    database.exec("ALTER TABLE bills ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'bargeld' CHECK (payment_mode IN ('bargeld', 'jeton'))");
-    console.log('[DB] Migration: Spalte bills.payment_mode hinzugefügt');
-  }
-
-  // Einmalige Erstbefuellung der settings-Zeile aus den bisherigen .env-Werten,
-  // damit bestehende Installationen nach dem Umstieg auf admin-editierbare
-  // Einstellungen unveraendert weiterlaufen (kein Verhaltensbruch beim Update).
-  const settingsRow = database.prepare('SELECT id FROM settings WHERE id = 1').get();
+  // Einmalige Erstbefuellung der settings-Zeile aus den .env-Werten,
+  // damit bestehende Installationen unveraendert weiterlaufen.
+  const settingsRow = await queryOne('SELECT id FROM settings WHERE id = 1');
   if (!settingsRow) {
-    database.prepare(`
+    await execute(`
       INSERT INTO settings (id, company_name, company_address1, company_address2, company_betriebsnummer, company_footer, printer_name, printer_width)
       VALUES (1, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `, [
       process.env.COMPANY_NAME || 'RAINER WEIN',
       process.env.COMPANY_ADDRESS1 || '',
       process.env.COMPANY_ADDRESS2 || '',
@@ -339,293 +237,226 @@ export function runMigrations(): void {
       process.env.COMPANY_FOOTER || 'Vielen Dank!',
       process.env.PRINTER_NAME || 'Knub Thermica',
       parseInt(process.env.PRINTER_WIDTH || '58', 10)
-    );
+    ]);
     console.log('[DB] Migration: settings-Zeile aus .env-Werten angelegt');
   }
-
-  // ----------------------------------------------------------------
-  // Daten-Migrationen (einmalig, idempotent über applied_migrations)
-  // ----------------------------------------------------------------
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS applied_migrations (
-      name        TEXT PRIMARY KEY,
-      applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-
-  runDataMigration(database, 'seed_menu_kgf_april26', seedMenuKgfApril26);
-  runDataMigration(database, 'drop_status_rechnung_angefordert', dropStatusRechnungAngefordert);
 
   console.log('[DB] Migrations ausgefuehrt');
 }
 
 /**
- * Führt eine benannte Daten-Migration genau einmal aus.
+ * Führt eine benannte Daten-Migration genau einmal aus (für künftige Schema-/Datenänderungen).
  * Marker liegt in applied_migrations; komplette Migration läuft in einer Transaktion.
  */
-function runDataMigration(db: Database.Database, name: string, fn: (db: Database.Database) => void): void {
-  const already = db.prepare('SELECT 1 FROM applied_migrations WHERE name = ?').get(name);
+export async function runDataMigration(name: string, fn: (tx: Tx) => Promise<void>): Promise<void> {
+  const already = await queryOne('SELECT 1 FROM applied_migrations WHERE name = ?', [name]);
   if (already) return;
-  const tx = db.transaction(() => {
-    fn(db);
-    db.prepare('INSERT INTO applied_migrations (name) VALUES (?)').run(name);
+  await withTransaction(async (tx) => {
+    await fn(tx);
+    await tx.execute('INSERT INTO applied_migrations (name) VALUES (?)', [name]);
   });
-  tx();
   console.log(`[DB] Migration angewendet: ${name}`);
 }
 
 /**
- * Status 'rechnung_angefordert' wurde abgeschafft. Bestehende Zeilen mit
- * diesem Status auf 'besetzt' rückführen und CHECK-Constraint neu setzen.
- */
-function dropStatusRechnungAngefordert(db: Database.Database): void {
-  // Bestehende 'rechnung_angefordert'-Zeilen auf 'besetzt' zurückführen.
-  // Die alte CHECK-Constraint auf der Tabelle erlaubt 'rechnung_angefordert' noch,
-  // wir schreiben nur keinen Code mehr, der diesen Status setzt.
-  // Frische DBs bekommen via CREATE TABLE bereits den neuen CHECK.
-  db.exec("UPDATE tables SET status = 'besetzt', updated_at = datetime('now') WHERE status = 'rechnung_angefordert'");
-}
-
-/**
  * Speisekarte "KGF April 26" (Rainer Wein).
- * Bestehende Kategorien/Artikel werden sanft deaktiviert (is_active=0),
- * so dass historische Bestellungen/Rechnungen weiterhin auflösbar bleiben,
- * aber im UI nicht mehr auftauchen.
  */
-function seedMenuKgfApril26(db: Database.Database): void {
-  db.exec('UPDATE menu_items SET is_active = 0, updated_at = datetime(\'now\')');
-  db.exec('UPDATE menu_categories SET is_active = 0, updated_at = datetime(\'now\')');
+const MENU_CATEGORIES: Array<[string, number, 'schank' | 'kueche']> = [
+  ['Weißwein & Rosé',     1, 'schank'],
+  ['Rotwein',             2, 'schank'],
+  ['Spezialwein & Rappa', 3, 'schank'],
+  ['Flasche',             4, 'schank'],
+  ['Keller',              5, 'schank'],
+  ['Alkoholfrei',         6, 'schank'],
+  ['Snacks',              7, 'schank'],
+  ['Brote',               8, 'kueche'],
+  ['Süßes',               9, 'kueche'],
+];
 
-  const categories: Array<[string, number, 'schank' | 'kueche']> = [
-    ['Weißwein & Rosé',     1, 'schank'],
-    ['Rotwein',             2, 'schank'],
-    ['Spezialwein & Rappa', 3, 'schank'],
-    ['Flasche',             4, 'schank'],
-    ['Keller',              5, 'schank'],
-    ['Alkoholfrei',         6, 'schank'],
-    ['Snacks',              7, 'schank'],
-    ['Brote',               8, 'kueche'],
-    ['Süßes',               9, 'kueche'],
-  ];
-  const insertCat = db.prepare('INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?)');
-  const catId: Record<string, number> = {};
-  for (const [name, sort, target] of categories) {
-    catId[name] = insertCat.run(name, sort, target).lastInsertRowid as number;
-  }
+type MenuItemSeed = [cat: string, name: string, price: number, sort: number, mode: 'sofort' | 'lieferzeit'];
+const MENU_ITEMS: MenuItemSeed[] = [
+  // Weißwein & Rosé (1/8)
+  ['Weißwein & Rosé', 'Weinviertel DAC 2025 Black Edition',   3.50, 1, 'sofort'],
+  ['Weißwein & Rosé', 'Weinviertel DAC 2025 Silver Edition',  4.00, 2, 'sofort'],
+  ['Weißwein & Rosé', 'Grüner Veltliner Qualitätswein 2025',  3.00, 3, 'sofort'],
+  ['Weißwein & Rosé', 'Welschriesling Qualitätswein 2025',    3.50, 4, 'sofort'],
+  ['Weißwein & Rosé', 'Zweigelt Rosé Qualitätswein 2025',     4.00, 5, 'sofort'],
+  ['Weißwein & Rosé', 'Weinviertel DAC 2024',                 3.50, 6, 'sofort'],
+  ['Weißwein & Rosé', 'Weinviertel DAC 2024 Reserve',         4.50, 7, 'sofort'],
+  ['Weißwein & Rosé', 'Grüner Veltliner 2024 halbtrocken',    3.00, 8, 'sofort'],
+  ['Weißwein & Rosé', 'Riesling 2022',                        3.50, 9, 'sofort'],
 
-  type Item = [cat: string, name: string, price: number, sort: number, mode: 'sofort' | 'lieferzeit'];
-  const items: Item[] = [
-    // Weißwein & Rosé (1/8)
-    ['Weißwein & Rosé', 'Weinviertel DAC 2025 Black Edition',   3.50, 1, 'sofort'],
-    ['Weißwein & Rosé', 'Weinviertel DAC 2025 Silver Edition',  4.00, 2, 'sofort'],
-    ['Weißwein & Rosé', 'Grüner Veltliner Qualitätswein 2025',  3.00, 3, 'sofort'],
-    ['Weißwein & Rosé', 'Welschriesling Qualitätswein 2025',    3.50, 4, 'sofort'],
-    ['Weißwein & Rosé', 'Zweigelt Rosé Qualitätswein 2025',     4.00, 5, 'sofort'],
-    ['Weißwein & Rosé', 'Weinviertel DAC 2024',                 3.50, 6, 'sofort'],
-    ['Weißwein & Rosé', 'Weinviertel DAC 2024 Reserve',         4.50, 7, 'sofort'],
-    ['Weißwein & Rosé', 'Grüner Veltliner 2024 halbtrocken',    3.00, 8, 'sofort'],
-    ['Weißwein & Rosé', 'Riesling 2022',                        3.50, 9, 'sofort'],
+  // Rotwein (1/8)
+  ['Rotwein', 'Merlot 2024',             4.00, 1, 'sofort'],
+  ['Rotwein', 'Blauburger 2024',         4.00, 2, 'sofort'],
+  ['Rotwein', 'Trilogie 2023 Barrique',  4.50, 3, 'sofort'],
+  ['Rotwein', 'Zweigelt 2022 Barrique',  4.50, 4, 'sofort'],
 
-    // Rotwein (1/8)
-    ['Rotwein', 'Merlot 2024',             4.00, 1, 'sofort'],
-    ['Rotwein', 'Blauburger 2024',         4.00, 2, 'sofort'],
-    ['Rotwein', 'Trilogie 2023 Barrique',  4.50, 3, 'sofort'],
-    ['Rotwein', 'Zweigelt 2022 Barrique',  4.50, 4, 'sofort'],
+  // Spezialwein & Rappa (1/8 bzw. 2cl)
+  ['Spezialwein & Rappa', 'PetNat 2023–2025',      5.00, 1, 'sofort'],
+  ['Spezialwein & Rappa', 'OrangeWein 2022',       4.00, 2, 'sofort'],
+  ['Spezialwein & Rappa', 'Rappa 2022–2024 2cl',   2.50, 3, 'sofort'],
 
-    // Spezialwein & Rappa (1/8 bzw. 2cl)
-    ['Spezialwein & Rappa', 'PetNat 2023–2025',      5.00, 1, 'sofort'],
-    ['Spezialwein & Rappa', 'OrangeWein 2022',       4.00, 2, 'sofort'],
-    ['Spezialwein & Rappa', 'Rappa 2022–2024 2cl',   2.50, 3, 'sofort'],
+  // Flasche (Tisch-Preise)
+  ['Flasche', 'Weinviertel DAC 2025 Black Edition',  19.00,  1, 'sofort'],
+  ['Flasche', 'Weinviertel DAC 2025 Silver Edition', 22.00,  2, 'sofort'],
+  ['Flasche', 'Grüner Veltliner Qualitätswein 2025', 16.00,  3, 'sofort'],
+  ['Flasche', 'Welschriesling Qualitätswein 2025',   10.00,  4, 'sofort'],
+  ['Flasche', 'Zweigelt Rosé Qualitätswein 2025',    22.00,  5, 'sofort'],
+  ['Flasche', 'Weinviertel DAC 2024',                19.00,  6, 'sofort'],
+  ['Flasche', 'Weinviertel DAC 2024 Reserve',        25.00,  7, 'sofort'],
+  ['Flasche', 'Grüner Veltliner 2024 halbtrocken',   16.00,  8, 'sofort'],
+  ['Flasche', 'Riesling 2022',                       19.00,  9, 'sofort'],
+  ['Flasche', 'Merlot 2024',                         22.00, 10, 'sofort'],
+  ['Flasche', 'Blauburger 2024',                     22.00, 11, 'sofort'],
+  ['Flasche', 'Trilogie 2023 Barrique',              25.00, 12, 'sofort'],
+  ['Flasche', 'Zweigelt 2022 Barrique',              25.00, 13, 'sofort'],
+  ['Flasche', 'PetNat 2023–2025',                    28.00, 14, 'sofort'],
+  ['Flasche', 'OrangeWein 2022',                     22.00, 15, 'sofort'],
+  ['Flasche', 'Rappa 2022–2024 0,33l',               14.00, 16, 'sofort'],
 
-    // Flasche (Tisch-Preise)
-    ['Flasche', 'Weinviertel DAC 2025 Black Edition',  19.00,  1, 'sofort'],
-    ['Flasche', 'Weinviertel DAC 2025 Silver Edition', 22.00,  2, 'sofort'],
-    ['Flasche', 'Grüner Veltliner Qualitätswein 2025', 16.00,  3, 'sofort'],
-    ['Flasche', 'Welschriesling Qualitätswein 2025',   10.00,  4, 'sofort'],
-    ['Flasche', 'Zweigelt Rosé Qualitätswein 2025',    22.00,  5, 'sofort'],
-    ['Flasche', 'Weinviertel DAC 2024',                19.00,  6, 'sofort'],
-    ['Flasche', 'Weinviertel DAC 2024 Reserve',        25.00,  7, 'sofort'],
-    ['Flasche', 'Grüner Veltliner 2024 halbtrocken',   16.00,  8, 'sofort'],
-    ['Flasche', 'Riesling 2022',                       19.00,  9, 'sofort'],
-    ['Flasche', 'Merlot 2024',                         22.00, 10, 'sofort'],
-    ['Flasche', 'Blauburger 2024',                     22.00, 11, 'sofort'],
-    ['Flasche', 'Trilogie 2023 Barrique',              25.00, 12, 'sofort'],
-    ['Flasche', 'Zweigelt 2022 Barrique',              25.00, 13, 'sofort'],
-    ['Flasche', 'PetNat 2023–2025',                    28.00, 14, 'sofort'],
-    ['Flasche', 'OrangeWein 2022',                     22.00, 15, 'sofort'],
-    ['Flasche', 'Rappa 2022–2024 0,33l',               14.00, 16, 'sofort'],
+  // Keller (ab Keller 0,75l)
+  ['Keller', 'Weinviertel DAC 2025 Black Edition',   7.00,  1, 'sofort'],
+  ['Keller', 'Weinviertel DAC 2025 Silver Edition',  8.00,  2, 'sofort'],
+  ['Keller', 'Grüner Veltliner Qualitätswein 2025',  6.00,  3, 'sofort'],
+  ['Keller', 'Welschriesling Qualitätswein 2025',    7.00,  4, 'sofort'],
+  ['Keller', 'Zweigelt Rosé Qualitätswein 2025',     9.00,  5, 'sofort'],
+  ['Keller', 'Weinviertel DAC 2024',                 8.00,  6, 'sofort'],
+  ['Keller', 'Weinviertel DAC 2024 Reserve',        13.00,  7, 'sofort'],
+  ['Keller', 'Grüner Veltliner 2024 halbtrocken',    6.00,  8, 'sofort'],
+  ['Keller', 'Riesling 2022',                        7.00,  9, 'sofort'],
+  ['Keller', 'Merlot 2024',                          8.00, 10, 'sofort'],
+  ['Keller', 'Blauburger 2024',                      8.00, 11, 'sofort'],
+  ['Keller', 'Trilogie 2023 Barrique',               9.00, 12, 'sofort'],
+  ['Keller', 'Zweigelt 2022 Barrique',               9.00, 13, 'sofort'],
+  ['Keller', 'PetNat 2023–2025',                    11.00, 14, 'sofort'],
+  ['Keller', 'OrangeWein 2022',                      9.00, 15, 'sofort'],
 
-    // Keller (ab Keller 0,75l)
-    ['Keller', 'Weinviertel DAC 2025 Black Edition',   7.00,  1, 'sofort'],
-    ['Keller', 'Weinviertel DAC 2025 Silver Edition',  8.00,  2, 'sofort'],
-    ['Keller', 'Grüner Veltliner Qualitätswein 2025',  6.00,  3, 'sofort'],
-    ['Keller', 'Welschriesling Qualitätswein 2025',    7.00,  4, 'sofort'],
-    ['Keller', 'Zweigelt Rosé Qualitätswein 2025',     9.00,  5, 'sofort'],
-    ['Keller', 'Weinviertel DAC 2024',                 8.00,  6, 'sofort'],
-    ['Keller', 'Weinviertel DAC 2024 Reserve',        13.00,  7, 'sofort'],
-    ['Keller', 'Grüner Veltliner 2024 halbtrocken',    6.00,  8, 'sofort'],
-    ['Keller', 'Riesling 2022',                        7.00,  9, 'sofort'],
-    ['Keller', 'Merlot 2024',                          8.00, 10, 'sofort'],
-    ['Keller', 'Blauburger 2024',                      8.00, 11, 'sofort'],
-    ['Keller', 'Trilogie 2023 Barrique',               9.00, 12, 'sofort'],
-    ['Keller', 'Zweigelt 2022 Barrique',               9.00, 13, 'sofort'],
-    ['Keller', 'PetNat 2023–2025',                    11.00, 14, 'sofort'],
-    ['Keller', 'OrangeWein 2022',                      9.00, 15, 'sofort'],
+  // Alkoholfrei
+  ['Alkoholfrei', 'Gspritzter 1/4',             2.50,  1, 'sofort'],
+  ['Alkoholfrei', 'Gspritzter 1/2',             4.00,  2, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft Natur 1/4',      3.00,  3, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft Natur 1/2',      5.00,  4, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft Leitung 1/4',    3.00,  5, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft Leitung 1/2',    5.00,  6, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft gespritzt 1/4',  2.50,  7, 'sofort'],
+  ['Alkoholfrei', 'Traubensaft gespritzt 1/2',  4.00,  8, 'sofort'],
+  ['Alkoholfrei', 'Sodawasser 1/4',             1.50,  9, 'sofort'],
+  ['Alkoholfrei', 'Sodawasser 1,5l',            6.00, 10, 'sofort'],
 
-    // Alkoholfrei
-    ['Alkoholfrei', 'Gspritzter 1/4',             2.50,  1, 'sofort'],
-    ['Alkoholfrei', 'Gspritzter 1/2',             4.00,  2, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft Natur 1/4',      3.00,  3, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft Natur 1/2',      5.00,  4, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft Leitung 1/4',    3.00,  5, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft Leitung 1/2',    5.00,  6, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft gespritzt 1/4',  2.50,  7, 'sofort'],
-    ['Alkoholfrei', 'Traubensaft gespritzt 1/2',  4.00,  8, 'sofort'],
-    ['Alkoholfrei', 'Sodawasser 1/4',             1.50,  9, 'sofort'],
-    ['Alkoholfrei', 'Sodawasser 1,5l',            6.00, 10, 'sofort'],
+  // Snacks
+  ['Snacks', 'Popcorn klein', 2.00, 1, 'sofort'],
+  ['Snacks', 'Popcorn groß',  4.00, 2, 'sofort'],
 
-    // Snacks
-    ['Snacks', 'Popcorn klein', 2.00, 1, 'sofort'],
-    ['Snacks', 'Popcorn groß',  4.00, 2, 'sofort'],
+  // Brote (je € 4,50)
+  ['Brote', 'Brot Schinken',           4.50,  1, 'lieferzeit'],
+  ['Brote', 'Brot Speck',              4.50,  2, 'lieferzeit'],
+  ['Brote', 'Brot Thunfisch',          4.50,  3, 'lieferzeit'],
+  ['Brote', 'Brot Schweinsbratl',      4.50,  4, 'lieferzeit'],
+  ['Brote', 'Brot Kümmelbratl',        4.50,  5, 'lieferzeit'],
+  ['Brote', 'Brot Käse',               4.50,  6, 'lieferzeit'],
+  ['Brote', 'Brot Obatzen',            4.50,  7, 'lieferzeit'],
+  ['Brote', 'Brot Erdäpfelkas',        4.50,  8, 'lieferzeit'],
+  ['Brote', 'Brot Eieraufstrich',      4.50,  9, 'lieferzeit'],
+  ['Brote', 'Brot Veganer Aufstrich',  4.50, 10, 'lieferzeit'],
 
-    // Brote (je € 4,50)
-    ['Brote', 'Brot Schinken',           4.50,  1, 'lieferzeit'],
-    ['Brote', 'Brot Speck',              4.50,  2, 'lieferzeit'],
-    ['Brote', 'Brot Thunfisch',          4.50,  3, 'lieferzeit'],
-    ['Brote', 'Brot Schweinsbratl',      4.50,  4, 'lieferzeit'],
-    ['Brote', 'Brot Kümmelbratl',        4.50,  5, 'lieferzeit'],
-    ['Brote', 'Brot Käse',               4.50,  6, 'lieferzeit'],
-    ['Brote', 'Brot Obatzen',            4.50,  7, 'lieferzeit'],
-    ['Brote', 'Brot Erdäpfelkas',        4.50,  8, 'lieferzeit'],
-    ['Brote', 'Brot Eieraufstrich',      4.50,  9, 'lieferzeit'],
-    ['Brote', 'Brot Veganer Aufstrich',  4.50, 10, 'lieferzeit'],
-
-    // Süßes (je € 3,50)
-    ['Süßes', 'Schaumrollen',          3.50, 1, 'lieferzeit'],
-    ['Süßes', 'Sachertorte',           3.50, 2, 'lieferzeit'],
-    ['Süßes', 'Cheesecake',            3.50, 3, 'lieferzeit'],
-    ['Süßes', 'Obstkuchen',            3.50, 4, 'lieferzeit'],
-    ['Süßes', 'Bisquitroulade',        3.50, 5, 'lieferzeit'],
-    ['Süßes', 'Veganer Apfelkuchen',   3.50, 6, 'lieferzeit'],
-    ['Süßes', 'Topfenstrudel',         3.50, 7, 'lieferzeit'],
-  ];
-
-  const insertItem = db.prepare(
-    'INSERT INTO menu_items (category_id, name, price, sort_order, availability_mode) VALUES (?, ?, ?, ?, ?)'
-  );
-  for (const [cat, name, price, sort, mode] of items) {
-    insertItem.run(catId[cat], name, price, sort, mode);
-  }
-}
+  // Süßes (je € 3,50)
+  ['Süßes', 'Schaumrollen',          3.50, 1, 'lieferzeit'],
+  ['Süßes', 'Sachertorte',           3.50, 2, 'lieferzeit'],
+  ['Süßes', 'Cheesecake',            3.50, 3, 'lieferzeit'],
+  ['Süßes', 'Obstkuchen',            3.50, 4, 'lieferzeit'],
+  ['Süßes', 'Bisquitroulade',        3.50, 5, 'lieferzeit'],
+  ['Süßes', 'Veganer Apfelkuchen',   3.50, 6, 'lieferzeit'],
+  ['Süßes', 'Topfenstrudel',         3.50, 7, 'lieferzeit'],
+];
 
 export async function seedDefaultData(): Promise<void> {
-  const database = getDb();
-
   // Admin user
-  const existingAdmin = database.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+  const existingAdmin = await queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
   if (!existingAdmin) {
     const passwordHash = await bcrypt.hash('admin', 10);
     const pinHash = await bcrypt.hash('0000', 10);
-    database.prepare(`
+    await execute(`
       INSERT INTO users (username, password_hash, pin_hash, display_name, role)
       VALUES (?, ?, ?, ?, ?)
-    `).run('admin', passwordHash, pinHash, 'Administrator', 'admin');
+    `, ['admin', passwordHash, pinHash, 'Administrator', 'admin']);
     console.log('[DB] Default-Admin erstellt (admin/admin, PIN: 0000)');
   }
 
   // Kellner
-  const existingKellner = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Kellner 1');
+  const existingKellner = await queryOne('SELECT id FROM users WHERE display_name = ?', ['Kellner 1']);
   if (!existingKellner) {
     const pinHash1 = await bcrypt.hash('1111', 10);
     const pinHash2 = await bcrypt.hash('2222', 10);
-    database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash1, 'Kellner 1', 'kellner');
-    database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash2, 'Kellner 2', 'kellner');
+    await execute(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`, [pinHash1, 'Kellner 1', 'kellner']);
+    await execute(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`, [pinHash2, 'Kellner 2', 'kellner']);
     console.log('[DB] Demo-Kellner erstellt (PIN: 1111, 2222)');
   }
 
   // Schank-Chef (Dashboard am Laptop)
-  const existingSchank = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Schank-Chef');
+  const existingSchank = await queryOne('SELECT id FROM users WHERE display_name = ?', ['Schank-Chef']);
   if (!existingSchank) {
     const pinHash = await bcrypt.hash('9999', 10);
-    database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash, 'Schank-Chef', 'kueche_schank');
+    await execute(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`, [pinHash, 'Schank-Chef', 'kueche_schank']);
     console.log('[DB] Demo-Schank-Chef erstellt (PIN: 9999)');
   }
 
   // Schank-Kellner (Verkauf direkt an der Schank, ohne Tisch/Status-Tracking)
-  const existingSchankKellner = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Schank-Kellner');
+  const existingSchankKellner = await queryOne('SELECT id FROM users WHERE display_name = ?', ['Schank-Kellner']);
   if (!existingSchankKellner) {
     const pinHash = await bcrypt.hash('8888', 10);
-    database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash, 'Schank-Kellner', 'schank_kellner');
+    await execute(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`, [pinHash, 'Schank-Kellner', 'schank_kellner']);
     console.log('[DB] Demo-Schank-Kellner erstellt (PIN: 8888)');
   }
 
   // Kassa-SPK (Zentralkasse, 8-stelliger PIN, zahlt immer in Jetons)
-  const existingKassaSpk = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Kassa-SPK');
+  const existingKassaSpk = await queryOne('SELECT id FROM users WHERE display_name = ?', ['Kassa-SPK']);
   if (!existingKassaSpk) {
     const pinHash = await bcrypt.hash('12345678', 10);
-    database.prepare(`INSERT INTO users (pin_hash, display_name, role, payment_mode) VALUES (?, ?, ?, ?)`).run(pinHash, 'Kassa-SPK', 'kassa_spk', 'jeton');
+    await execute(`INSERT INTO users (pin_hash, display_name, role, payment_mode) VALUES (?, ?, ?, ?)`, [pinHash, 'Kassa-SPK', 'kassa_spk', 'jeton']);
     console.log('[DB] Demo-Kassa-SPK erstellt (PIN: 12345678)');
   }
 
   // Tables
-  const existingTables = database.prepare('SELECT COUNT(*) as count FROM tables').get() as any;
-  if (existingTables.count === 0) {
-    const insertTable = database.prepare('INSERT INTO tables (table_number, capacity) VALUES (?, ?)');
+  const existingTables = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM tables');
+  if (existingTables && existingTables.count === 0) {
     for (let i = 1; i <= 10; i++) {
-      insertTable.run(String(i), i <= 5 ? 4 : 6);
+      await execute('INSERT INTO tables (table_number, capacity) VALUES (?, ?)', [String(i), i <= 5 ? 4 : 6]);
     }
     console.log('[DB] 10 Demo-Tische erstellt');
   }
 
-  // Menu categories + items
-  const existingCats = database.prepare('SELECT COUNT(*) as count FROM menu_categories').get() as any;
-  if (existingCats.count === 0) {
-    const insertCat = database.prepare('INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?)');
-    insertCat.run('Brote', 1, 'kueche');           // 1 - Lieferzeit (aus dem Keller)
-    insertCat.run('Mehlspeisen', 2, 'kueche');      // 2 - Lieferzeit
-    insertCat.run('Aufstriche', 3, 'kueche');        // 3 - Lieferzeit
-    insertCat.run('Vitrine', 4, 'schank');           // 4 - Sofort (Theke)
-    insertCat.run('Wein', 5, 'schank');              // 5 - Sofort
-    insertCat.run('Saft & Wasser', 6, 'schank');     // 6 - Sofort
-    insertCat.run('Sonstiges', 7, 'schank');         // 7 - Sofort
-
-    // (category_id, name, price, sort_order, availability_mode)
-    const insertItem = database.prepare('INSERT INTO menu_items (category_id, name, price, sort_order, availability_mode) VALUES (?, ?, ?, ?, ?)');
-    // Brote (1) - Lieferzeit
-    insertItem.run(1, 'Bauernbrot', 3.50, 1, 'lieferzeit');
-    insertItem.run(1, 'Kornspitz', 2.50, 2, 'lieferzeit');
-    insertItem.run(1, 'Laugenstangerl', 2.80, 3, 'lieferzeit');
-    // Mehlspeisen (2) - Lieferzeit
-    insertItem.run(2, 'Topfenstrudel', 4.50, 1, 'lieferzeit');
-    insertItem.run(2, 'Apfelstrudel', 4.50, 2, 'lieferzeit');
-    insertItem.run(2, 'Buchteln', 5.00, 3, 'lieferzeit');
-    // Aufstriche (3) - Lieferzeit
-    insertItem.run(3, 'Liptauer', 3.50, 1, 'lieferzeit');
-    insertItem.run(3, 'Grammelschmalz', 3.50, 2, 'lieferzeit');
-    insertItem.run(3, 'Kuerbiskernaufstrich', 3.50, 3, 'lieferzeit');
-    // Vitrine (4) - Sofort
-    insertItem.run(4, 'Kanape Schinken', 3.00, 1, 'sofort');
-    insertItem.run(4, 'Kanape Lachs', 3.50, 2, 'sofort');
-    insertItem.run(4, 'Kanape Aufstrich', 2.80, 3, 'sofort');
-    insertItem.run(4, 'Brotchips', 2.50, 4, 'sofort');
-    // Wein (5) - Sofort
-    insertItem.run(5, 'Gruener Veltliner 1/8', 3.00, 1, 'sofort');
-    insertItem.run(5, 'Gruener Veltliner 1/4', 4.50, 2, 'sofort');
-    insertItem.run(5, 'Zweigelt 1/8', 3.20, 3, 'sofort');
-    insertItem.run(5, 'Zweigelt 1/4', 4.80, 4, 'sofort');
-    insertItem.run(5, 'Spritzer 1/4', 3.50, 5, 'sofort');
-    insertItem.run(5, 'Sturm 1/4', 3.00, 6, 'sofort');
-    // Saft & Wasser (6) - Sofort
-    insertItem.run(6, 'Apfelsaft gespritzt', 3.00, 1, 'sofort');
-    insertItem.run(6, 'Traubensaft', 3.00, 2, 'sofort');
-    insertItem.run(6, 'Mineralwasser 0.3l', 2.50, 3, 'sofort');
-    insertItem.run(6, 'Orangensaft', 3.20, 4, 'sofort');
-    // Sonstiges (7) - Sofort
-    insertItem.run(7, 'Bier 0.5l', 4.00, 1, 'sofort');
-    insertItem.run(7, 'Bier 0.3l', 3.00, 2, 'sofort');
-    insertItem.run(7, 'Radler 0.5l', 3.80, 3, 'sofort');
-    insertItem.run(7, 'Kaffee', 2.80, 4, 'sofort');
-
-    console.log('[DB] Demo-Speisekarte erstellt (7 Kategorien, Winzer-Heuriger)');
+  // Menu categories + items (Speisekarte "KGF April 26")
+  const existingCats = await queryOne<{ count: number }>('SELECT COUNT(*) as count FROM menu_categories');
+  if (existingCats && existingCats.count === 0) {
+    const catId: Record<string, number> = {};
+    for (const [name, sort, target] of MENU_CATEGORIES) {
+      const row = await queryOne<{ id: number }>(
+        'INSERT INTO menu_categories (name, sort_order, target) VALUES (?, ?, ?) RETURNING id',
+        [name, sort, target]
+      );
+      catId[name] = row!.id;
+    }
+    for (const [cat, name, price, sort, mode] of MENU_ITEMS) {
+      await execute(
+        'INSERT INTO menu_items (category_id, name, price, sort_order, availability_mode) VALUES (?, ?, ?, ?, ?)',
+        [catId[cat], name, price, sort, mode]
+      );
+    }
+    console.log('[DB] Demo-Speisekarte erstellt (9 Kategorien, KGF April 26)');
   }
+}
+
+// Erlaubt `npm run migrate` (tsx src/database.ts direkt ausgefuehrt) zusaetzlich zum
+// Aufruf aus index.ts beim Server-Boot.
+if (require.main === module) {
+  runMigrations()
+    .then(() => {
+      console.log('[DB] migrate abgeschlossen');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('[DB] migrate fehlgeschlagen:', err);
+      process.exit(1);
+    });
 }

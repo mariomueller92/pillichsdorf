@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import * as ordersApi from '@/api/orders.api';
@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { Clock, ChefHat, CheckCircle, AlertCircle, Truck, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { parseDbTime, minutesSince } from '@/utils/time';
+import { playNotificationSound } from '@/utils/notificationSound';
 
 interface OrderWithItems {
   id: number;
@@ -47,6 +48,7 @@ export function MyOrders() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
+  const seenReadyItemIds = useRef<Set<number> | null>(null);
 
   const fetchOrders = useCallback(async () => {
     if (!user) return;
@@ -73,6 +75,18 @@ export function MyOrders() {
       const detailed = await Promise.all(
         sorted.map(o => ordersApi.getOrder(o.id))
       );
+
+      // Ersetzt den frueheren "order:item_ready"-Socket-Push: eine Position, die seit
+      // dem letzten Poll neu auf "fertig" gewechselt ist, loest den Ton aus.
+      const readyIds = new Set(
+        (detailed as OrderWithItems[]).flatMap(o => o.items).filter(i => i.status === 'fertig').map(i => i.id)
+      );
+      if (seenReadyItemIds.current !== null) {
+        const hasNewlyReady = [...readyIds].some(id => !seenReadyItemIds.current!.has(id));
+        if (hasNewlyReady) playNotificationSound();
+      }
+      seenReadyItemIds.current = readyIds;
+
       setOrders(detailed as OrderWithItems[]);
     } catch {
       // ignore

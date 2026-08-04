@@ -7,27 +7,29 @@ import * as jetonTypesService from '../services/jetonTypes.service.js';
 
 const router = Router();
 
-router.get('/', auth, (_req: Request, res: Response) => {
-  res.json(jetonTypesService.listJetonTypes());
+router.get('/', auth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await jetonTypesService.listJetonTypes());
+  } catch (err) { next(err); }
 });
 
-router.post('/', auth, role(['admin']), validate(createJetonTypeSchema), (req: Request, res: Response, next: NextFunction) => {
+router.post('/', auth, role(['admin']), validate(createJetonTypeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const jt = jetonTypesService.createJetonType(req.body);
+    const jt = await jetonTypesService.createJetonType(req.body);
     res.status(201).json(jt);
   } catch (err) { next(err); }
 });
 
-router.put('/:id', auth, role(['admin']), validate(updateJetonTypeSchema), (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', auth, role(['admin']), validate(updateJetonTypeSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const jt = jetonTypesService.updateJetonType(parseInt(req.params.id), req.body);
+    const jt = await jetonTypesService.updateJetonType(parseInt(req.params.id), req.body);
     res.json(jt);
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', auth, role(['admin']), (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', auth, role(['admin']), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    jetonTypesService.deleteJetonType(parseInt(req.params.id));
+    await jetonTypesService.deleteJetonType(parseInt(req.params.id));
     res.json({ success: true });
   } catch (err) { next(err); }
 });
