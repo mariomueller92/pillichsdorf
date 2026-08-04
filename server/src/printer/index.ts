@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { getSettings } from '../services/settings.service.js';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';
@@ -81,10 +82,13 @@ function toCp1252(text: string): Buffer {
 
 let enabled = false;
 let printerName = '';
+let printerWidth = 32;
 
 export function initPrinter(): boolean {
   enabled = config.printer.enabled;
-  printerName = config.printer.name;
+  const settings = getSettings();
+  printerName = settings.printer_name;
+  printerWidth = settings.printer_width;
 
   if (!enabled) {
     console.log('[Drucker] Deaktiviert (PRINTER_ENABLED=false)');
@@ -111,6 +115,13 @@ export function initPrinter(): boolean {
 
 export function isPrinterEnabled(): boolean {
   return enabled;
+}
+
+// Wird von der Settings-Route nach einem Admin-Update aufgerufen, damit
+// Drucker-Name/-Breite sofort greifen, ohne den Server neu zu starten.
+export function applySettingsToPrinter(name: string, width: number): void {
+  printerName = name;
+  printerWidth = width;
 }
 
 const RAW_PRINT_SCRIPT = path.join(__dirname, 'raw-print.ps1');
@@ -165,7 +176,7 @@ function reportPrinterError(msg: string, isRealError: boolean): void {
 
 // Build a formatted ESC/POS receipt
 export function buildReceipt(): ReceiptBuilder {
-  return new ReceiptBuilder(config.printer.width);
+  return new ReceiptBuilder(printerWidth);
 }
 
 export class ReceiptBuilder {

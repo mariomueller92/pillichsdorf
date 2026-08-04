@@ -45,6 +45,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
           notes: '',
           category_target: categoryTarget,
           availability_mode: item.availability_mode || 'sofort',
+          jeton_type_id: item.jeton_type_id ?? null,
         }],
       });
     }

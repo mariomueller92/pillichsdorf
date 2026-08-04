@@ -26,7 +26,7 @@ export async function getItems(categoryId?: number): Promise<MenuItem[]> {
   return data;
 }
 
-export async function createItem(body: { category_id: number; name: string; price: number; sort_order: number }): Promise<MenuItem> {
+export async function createItem(body: { category_id: number; name: string; price: number; sort_order: number; jeton_type_id?: number | null }): Promise<MenuItem> {
   const { data } = await api.post<MenuItem>('/menu/items', body);
   return data;
 }

@@ -117,6 +117,28 @@ export function getOrdersByCategory(r: Range) {
   `).all(...o.params);
 }
 
+export function getJetonTotals(r: Range) {
+  const db = getDb();
+  const b = billsRange(r);
+  const clause = b.clause ? `${b.clause} AND b.payment_mode = 'jeton'` : `WHERE b.payment_mode = 'jeton'`;
+  return db.prepare(`
+    SELECT jt.id as jeton_type_id,
+           jt.name,
+           jt.color,
+           jt.value,
+           SUM(bi.quantity) as count,
+           ROUND(SUM(bi.quantity) * jt.value, 2) as subtotal_eur
+    FROM bill_items bi
+    JOIN order_items oi ON bi.order_item_id = oi.id
+    JOIN menu_items mi ON oi.menu_item_id = mi.id
+    JOIN jeton_types jt ON mi.jeton_type_id = jt.id
+    JOIN bills b ON bi.bill_id = b.id
+    ${clause}
+    GROUP BY jt.id
+    ORDER BY jt.sort_order, jt.name
+  `).all(...b.params);
+}
+
 /**
  * Löscht alle historischen Auftrags- & Abrechnungsdaten.
  * Setzt auch alle Tische auf "frei" und beendet laufende Bar-Slots.
@@ -141,5 +163,6 @@ export function getStatsBundle(r: Range, topLimit: number = 10) {
     top_items: getTopItems(r, topLimit),
     by_waiter: getOrdersByWaiter(r),
     by_category: getOrdersByCategory(r),
+    jeton_totals: getJetonTotals(r),
   };
 }

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '@/stores/authStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { SocketProvider } from '@/socket/SocketProvider';
 import { AuthGuard } from '@/guards/AuthGuard';
 import { RoleGuard } from '@/guards/RoleGuard';
@@ -14,18 +15,26 @@ import { BillingScreen } from '@/features/waiter/BillingScreen';
 import { MyOrders } from '@/features/waiter/MyOrders';
 import { BarOverview } from '@/features/waiter/BarOverview';
 import { ZentralDashboard } from '@/features/dashboard/ZentralDashboard';
+import { SchankSaleScreen } from '@/features/schank/SchankSaleScreen';
+import { SchankCheckoutScreen } from '@/features/schank/SchankCheckoutScreen';
+import { KassaSpkScreen } from '@/features/kassa/KassaSpkScreen';
+import { KassaHistoryScreen } from '@/features/kassa/KassaHistoryScreen';
 import { StatsPage } from '@/features/stats/StatsPage';
 import { UserManagement } from '@/features/admin/UserManagement';
 import { MenuManagement } from '@/features/admin/MenuManagement';
+import { JetonTypeManagement } from '@/features/admin/JetonTypeManagement';
+import { SettingsManagement } from '@/features/admin/SettingsManagement';
 import { TableManagement } from '@/features/admin/TableManagement';
 import { AdminLayout } from '@/features/admin/AdminLayout';
 import { AdminOrders } from '@/features/admin/AdminOrders';
 
 export default function App() {
   const restore = useAuthStore(s => s.restore);
+  const loadSettings = useSettingsStore(s => s.load);
 
   useEffect(() => {
     restore();
+    loadSettings();
   }, []);
 
   return (
@@ -55,14 +64,28 @@ export default function App() {
                 <Route path="/statistik" element={<StatsPage />} />
               </Route>
 
+              {/* Schank-Kellner (Verkauf direkt an der Schank) */}
+              <Route element={<RoleGuard allowed={['schank_kellner', 'admin']} />}>
+                <Route path="/schank/verkauf" element={<SchankSaleScreen />} />
+                <Route path="/schank/kassieren/:orderId" element={<SchankCheckoutScreen />} />
+              </Route>
+
+              {/* Kassa-SPK (Zentralkasse mit Jeton-Ausgabe) */}
+              <Route element={<RoleGuard allowed={['kassa_spk', 'admin']} />}>
+                <Route path="/kassa" element={<KassaSpkScreen />} />
+                <Route path="/kassa/historie" element={<KassaHistoryScreen />} />
+              </Route>
+
               {/* Admin routes */}
               <Route element={<RoleGuard allowed={['admin']} />}>
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<Navigate to="/admin/speisekarte" replace />} />
                   <Route path="benutzer" element={<UserManagement />} />
                   <Route path="speisekarte" element={<MenuManagement />} />
+                  <Route path="jeton-typen" element={<JetonTypeManagement />} />
                   <Route path="tische" element={<TableManagement />} />
                   <Route path="bestellungen" element={<AdminOrders />} />
+                  <Route path="einstellungen" element={<SettingsManagement />} />
                 </Route>
               </Route>
             </Route>

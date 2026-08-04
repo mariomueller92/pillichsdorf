@@ -63,11 +63,11 @@ export function getItem(id: number): MenuItem {
   return item;
 }
 
-export function createItem(data: { category_id: number; name: string; price: number; sort_order: number }): MenuItem {
+export function createItem(data: { category_id: number; name: string; price: number; sort_order: number; jeton_type_id?: number | null }): MenuItem {
   getCategory(data.category_id); // verify category exists
   const result = getDb().prepare(
-    'INSERT INTO menu_items (category_id, name, price, sort_order) VALUES (?, ?, ?, ?)'
-  ).run(data.category_id, data.name, data.price, data.sort_order);
+    'INSERT INTO menu_items (category_id, name, price, sort_order, jeton_type_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(data.category_id, data.name, data.price, data.sort_order, data.jeton_type_id ?? null);
   return getItem(result.lastInsertRowid as number);
 }
 
@@ -83,6 +83,7 @@ export function updateItem(id: number, data: Partial<MenuItem>): MenuItem {
   if (data.is_available !== undefined) { updates.push('is_available = ?'); values.push(data.is_available); }
   if (data.is_active !== undefined) { updates.push('is_active = ?'); values.push(data.is_active); }
   if ((data as any).availability_mode !== undefined) { updates.push('availability_mode = ?'); values.push((data as any).availability_mode); }
+  if (data.jeton_type_id !== undefined) { updates.push('jeton_type_id = ?'); values.push(data.jeton_type_id); }
 
   if (updates.length > 0) {
     updates.push("updated_at = datetime('now')");

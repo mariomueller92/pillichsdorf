@@ -15,6 +15,11 @@ function resolveDbPath(): string {
   return path.isAbsolute(raw) ? raw : path.resolve(REPO_ROOT, raw);
 }
 
+// Firmenname/-adresse, Bon-Footer sowie Drucker-Name/-Breite sind seit der
+// Mehrmandanten-Umstellung admin-editierbar in der DB (Tabelle "settings",
+// siehe settings.service.ts) statt statisch aus .env. Die COMPANY_*/PRINTER_NAME/
+// PRINTER_WIDTH env-Variablen wirken nur noch als Erstbefuellung dieser Zeile
+// beim allerersten Migrationslauf (siehe database.ts).
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
@@ -23,15 +28,6 @@ export const config = {
   dbPath: resolveDbPath(),
   printer: {
     enabled: process.env.PRINTER_ENABLED === 'true',
-    name: process.env.PRINTER_NAME || 'Knub Thermica',
-    width: parseInt(process.env.PRINTER_WIDTH || '32', 10),
-  },
-  company: {
-    name: process.env.COMPANY_NAME || 'RAINER WEIN',
-    address1: process.env.COMPANY_ADDRESS1 || '',
-    address2: process.env.COMPANY_ADDRESS2 || '',
-    betriebsnummer: process.env.COMPANY_BETRIEBSNUMMER || '',
-    footer: process.env.COMPANY_FOOTER || 'Vielen Dank!',
   },
   logLevel: process.env.LOG_LEVEL || 'info',
 };

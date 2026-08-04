@@ -1,17 +1,37 @@
-export type Role = 'admin' | 'kellner' | 'kueche_schank';
+export type Role = 'admin' | 'kellner' | 'kueche_schank' | 'schank_kellner' | 'kassa_spk';
 export type TableStatus = 'frei' | 'besetzt';
 export type OrderStatus = 'offen' | 'in_bearbeitung' | 'fertig' | 'serviert' | 'storniert';
 export type OrderItemStatus = 'neu' | 'in_zubereitung' | 'fertig' | 'serviert' | 'storniert';
 export type CategoryTarget = 'kueche' | 'schank';
 export type DiscountType = 'percentage' | 'fixed';
 export type AvailabilityMode = 'sofort' | 'lieferzeit';
+export type PaymentMode = 'bargeld' | 'jeton';
 
 export interface User {
   id: number;
   username: string | null;
   display_name: string;
   role: Role;
+  payment_mode: PaymentMode;
   is_active: number;
+}
+
+export interface JetonType {
+  id: number;
+  name: string;
+  color: string;
+  value: number;
+  sort_order: number;
+  is_active: number;
+}
+
+export interface JetonBreakdownEntry {
+  jeton_type_id: number;
+  name: string;
+  color: string;
+  value: number;
+  count: number;
+  subtotal_eur: number;
 }
 
 export interface MenuCategory {
@@ -30,6 +50,7 @@ export interface MenuItem {
   sort_order: number;
   is_available: number;
   availability_mode: AvailabilityMode;
+  jeton_type_id: number | null;
   is_active: number;
 }
 
@@ -74,6 +95,10 @@ export interface OrderItemWithDetails {
   availability_mode: AvailabilityMode;
   acknowledged_by: number | null;
   acknowledged_at: string | null;
+  jeton_type_id: number | null;
+  jeton_name: string | null;
+  jeton_color: string | null;
+  jeton_value: number | null;
 }
 
 export interface Bill {
@@ -84,6 +109,7 @@ export interface Bill {
   discount_type: DiscountType | null;
   discount_value: number;
   total: number;
+  payment_mode: PaymentMode;
   notes: string | null;
   created_at: string;
 }
@@ -96,9 +122,22 @@ export interface CartItem {
   notes: string;
   category_target: CategoryTarget;
   availability_mode: AvailabilityMode;
+  jeton_type_id: number | null;
 }
 
 export interface AuthResponse {
   token: string;
   user: User;
+}
+
+export interface Settings {
+  id: 1;
+  company_name: string;
+  company_address1: string;
+  company_address2: string;
+  company_betriebsnummer: string;
+  company_footer: string;
+  printer_name: string;
+  printer_width: number;
+  updated_at: string;
 }

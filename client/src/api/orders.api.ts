@@ -1,7 +1,7 @@
 import api from './client';
 import { Order } from '@/types';
 
-export async function getOrders(filters?: { table_id?: number; status?: string }): Promise<any[]> {
+export async function getOrders(filters?: { table_id?: number; status?: string; waiter_id?: number }): Promise<any[]> {
   const { data } = await api.get('/orders', { params: filters });
   return data;
 }

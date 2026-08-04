@@ -2,11 +2,13 @@ import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { BottomNav } from './BottomNav';
 import { useAuthStore } from '@/stores/authStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { LogOut, Volume2, VolumeX, Sun, Moon, WifiOff } from 'lucide-react';
 import { useUIStore } from '@/stores/uiStore';
 
 export function AppShell() {
   const user = useAuthStore(s => s.user);
+  const companyName = useSettingsStore(s => s.companyName);
   const logout = useAuthStore(s => s.logout);
   const soundEnabled = useUIStore(s => s.soundEnabled);
   const toggleSound = useUIStore(s => s.toggleSound);
@@ -32,7 +34,7 @@ export function AppShell() {
       {/* Top bar */}
       <header className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
         <div className="font-semibold text-sm">
-          Rainer Wein
+          {companyName}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={toggleHighContrast} className="p-1.5 rounded hover:bg-slate-700 active:scale-90" title="Kontrast">

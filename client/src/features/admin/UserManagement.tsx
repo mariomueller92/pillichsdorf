@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '@/api/client';
-import { User, Role } from '@/types';
+import { User, Role, PaymentMode } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -12,13 +12,15 @@ const roleLabels: Record<Role, string> = {
   admin: 'Admin',
   kellner: 'Kellner',
   kueche_schank: 'Küche/Schank',
+  schank_kellner: 'Schank-Kellner',
+  kassa_spk: 'Kassa-SPK',
 };
 
 export function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
-  const [form, setForm] = useState({ display_name: '', username: '', password: '', pin: '', role: 'kellner' as Role });
+  const [form, setForm] = useState({ display_name: '', username: '', password: '', pin: '', role: 'kellner' as Role, payment_mode: 'bargeld' as PaymentMode });
 
   const fetchUsers = async () => {
     const { data } = await api.get('/users');
@@ -29,19 +31,19 @@ export function UserManagement() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ display_name: '', username: '', password: '', pin: '', role: 'kellner' });
+    setForm({ display_name: '', username: '', password: '', pin: '', role: 'kellner', payment_mode: 'bargeld' });
     setShowForm(true);
   };
 
   const openEdit = (user: User) => {
     setEditing(user);
-    setForm({ display_name: user.display_name, username: user.username || '', password: '', pin: '', role: user.role });
+    setForm({ display_name: user.display_name, username: user.username || '', password: '', pin: '', role: user.role, payment_mode: user.payment_mode });
     setShowForm(true);
   };
 
   const handleSave = async () => {
     try {
-      const body: any = { display_name: form.display_name, role: form.role };
+      const body: any = { display_name: form.display_name, role: form.role, payment_mode: form.payment_mode };
       if (form.username) body.username = form.username;
       if (form.password) body.password = form.password;
       if (form.pin) body.pin = form.pin;
@@ -87,6 +89,11 @@ export function UserManagement() {
               <Badge variant={user.role === 'admin' ? 'info' : user.role === 'kellner' ? 'success' : 'warning'}>
                 {roleLabels[user.role]}
               </Badge>
+              {(user.role === 'kellner' || user.role === 'schank_kellner') && (
+                <Badge variant={user.payment_mode === 'jeton' ? 'warning' : 'neutral'}>
+                  {user.payment_mode === 'jeton' ? 'Jeton' : 'Bargeld'}
+                </Badge>
+              )}
               <button onClick={() => openEdit(user)} className="p-2 hover:bg-slate-100 rounded">
                 <Pencil size={16} />
               </button>
@@ -105,7 +112,7 @@ export function UserManagement() {
           <Input label="Anzeigename" value={form.display_name} onChange={e => setForm({ ...form, display_name: e.target.value })} />
           <Input label="Benutzername (optional)" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
           <Input label={editing ? 'Neues Passwort (leer lassen)' : 'Passwort'} type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
-          <Input label={editing ? 'Neuer PIN (leer lassen)' : 'PIN (4 Ziffern)'} value={form.pin} maxLength={4} onChange={e => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })} />
+          <Input label={editing ? 'Neuer PIN (leer lassen)' : 'PIN (4 oder 8 Ziffern)'} value={form.pin} maxLength={8} onChange={e => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })} />
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-slate-700">Rolle</label>
             <select
@@ -114,10 +121,25 @@ export function UserManagement() {
               className="rounded-lg border border-slate-300 px-3 py-2.5"
             >
               <option value="kellner">Kellner</option>
+              <option value="schank_kellner">Schank-Kellner</option>
               <option value="kueche_schank">Küche/Schank</option>
+              <option value="kassa_spk">Kassa-SPK</option>
               <option value="admin">Admin</option>
             </select>
           </div>
+          {(form.role === 'kellner' || form.role === 'schank_kellner') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-slate-700">Zahlungsart</label>
+              <select
+                value={form.payment_mode}
+                onChange={e => setForm({ ...form, payment_mode: e.target.value as PaymentMode })}
+                className="rounded-lg border border-slate-300 px-3 py-2.5"
+              >
+                <option value="bargeld">Bargeld</option>
+                <option value="jeton">Jeton</option>
+              </select>
+            </div>
+          )}
           <Button onClick={handleSave} size="lg">Speichern</Button>
         </div>
       </Modal>

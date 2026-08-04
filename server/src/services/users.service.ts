@@ -7,18 +7,18 @@ export function listUsers(role?: string): UserPublic[] {
   const db = getDb();
   if (role) {
     return db.prepare(
-      'SELECT id, username, display_name, role, is_active FROM users WHERE role = ? ORDER BY display_name'
+      'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE role = ? ORDER BY display_name'
     ).all(role) as UserPublic[];
   }
   return db.prepare(
-    'SELECT id, username, display_name, role, is_active FROM users ORDER BY display_name'
+    'SELECT id, username, display_name, role, payment_mode, is_active FROM users ORDER BY display_name'
   ).all() as UserPublic[];
 }
 
 export function getUser(id: number): UserPublic {
   const db = getDb();
   const user = db.prepare(
-    'SELECT id, username, display_name, role, is_active FROM users WHERE id = ?'
+    'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE id = ?'
   ).get(id) as UserPublic | undefined;
   if (!user) throw new AppError(404, 'Benutzer nicht gefunden');
   return user;
@@ -30,17 +30,20 @@ export async function createUser(data: {
   pin?: string | null;
   display_name: string;
   role: string;
+  payment_mode?: string;
 }): Promise<UserPublic> {
   const db = getDb();
 
   const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : null;
   const pinHash = data.pin ? await bcrypt.hash(data.pin, 10) : null;
+  // Kassa-SPK gibt ausschliesslich Jetons aus - Zahlungsart ist kein Nutzer-Setting
+  const paymentMode = data.role === 'kassa_spk' ? 'jeton' : (data.payment_mode || 'bargeld');
 
   try {
     const result = db.prepare(`
-      INSERT INTO users (username, password_hash, pin_hash, display_name, role)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(data.username || null, passwordHash, pinHash, data.display_name, data.role);
+      INSERT INTO users (username, password_hash, pin_hash, display_name, role, payment_mode)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(data.username || null, passwordHash, pinHash, data.display_name, data.role, paymentMode);
 
     return getUser(result.lastInsertRowid as number);
   } catch (err: any) {
@@ -57,14 +60,21 @@ export async function updateUser(id: number, data: {
   pin?: string | null;
   display_name?: string;
   role?: string;
+  payment_mode?: string;
   is_active?: number;
 }): Promise<UserPublic> {
   const db = getDb();
-  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as { role: string; payment_mode: string } | undefined;
   if (!existing) throw new AppError(404, 'Benutzer nicht gefunden');
 
   const updates: string[] = [];
   const values: any[] = [];
+
+  // Kassa-SPK gibt ausschliesslich Jetons aus - Zahlungsart ist kein Nutzer-Setting
+  const effectiveRole = data.role ?? existing.role;
+  if (effectiveRole === 'kassa_spk') {
+    data.payment_mode = 'jeton';
+  }
 
   if (data.username !== undefined) {
     updates.push('username = ?');
@@ -85,6 +95,10 @@ export async function updateUser(id: number, data: {
   if (data.role !== undefined) {
     updates.push('role = ?');
     values.push(data.role);
+  }
+  if (data.payment_mode !== undefined) {
+    updates.push('payment_mode = ?');
+    values.push(data.payment_mode);
   }
   if (data.is_active !== undefined) {
     updates.push('is_active = ?');

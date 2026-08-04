@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as menuApi from '@/api/menu.api';
-import { MenuCategory, MenuItem, CategoryTarget } from '@/types';
+import * as jetonTypesApi from '@/api/jetonTypes.api';
+import { MenuCategory, MenuItem, CategoryTarget, JetonType } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
@@ -11,6 +12,7 @@ import { Plus, Pencil, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 export function MenuManagement() {
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
+  const [jetonTypes, setJetonTypes] = useState<JetonType[]>([]);
   const [expandedCat, setExpandedCat] = useState<number | null>(null);
 
   // Category form
@@ -21,10 +23,11 @@ export function MenuManagement() {
   // Item form
   const [showItemForm, setShowItemForm] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
-  const [itemForm, setItemForm] = useState({ category_id: 0, name: '', price: 0, sort_order: 0 });
+  const [itemForm, setItemForm] = useState({ category_id: 0, name: '', price: 0, sort_order: 0, jeton_type_id: null as number | null });
 
   const fetch = async () => {
-    const [cats, its] = await Promise.all([menuApi.getCategories(), menuApi.getItems()]);
+    const [jt, cats, its] = await Promise.all([jetonTypesApi.getJetonTypes(), menuApi.getCategories(), menuApi.getItems()]);
+    setJetonTypes(jt);
     setCategories(cats);
     setItems(its);
   };
@@ -69,13 +72,13 @@ export function MenuManagement() {
   // Item handlers
   const openCreateItem = (categoryId: number) => {
     setEditingItem(null);
-    setItemForm({ category_id: categoryId, name: '', price: 0, sort_order: 0 });
+    setItemForm({ category_id: categoryId, name: '', price: 0, sort_order: 0, jeton_type_id: null });
     setShowItemForm(true);
   };
 
   const openEditItem = (item: MenuItem) => {
     setEditingItem(item);
-    setItemForm({ category_id: item.category_id, name: item.name, price: item.price, sort_order: item.sort_order });
+    setItemForm({ category_id: item.category_id, name: item.name, price: item.price, sort_order: item.sort_order, jeton_type_id: item.jeton_type_id });
     setShowItemForm(true);
   };
 
@@ -147,6 +150,15 @@ export function MenuManagement() {
                       <div className="flex items-center gap-2">
                         <span className={`text-sm ${!item.is_available ? 'line-through text-slate-400' : ''}`}>{item.name}</span>
                         <span className="text-sm font-medium text-primary">{item.price.toFixed(2).replace('.', ',')} &euro;</span>
+                        {item.jeton_type_id != null && (
+                          <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                            <span
+                              className="w-2.5 h-2.5 rounded-full inline-block border border-slate-200"
+                              style={{ background: jetonTypes.find(jt => jt.id === item.jeton_type_id)?.color }}
+                            />
+                            {jetonTypes.find(jt => jt.id === item.jeton_type_id)?.name}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         <button
@@ -196,6 +208,19 @@ export function MenuManagement() {
           <Input label="Name" value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} />
           <Input label="Preis (EUR)" type="number" step="0.1" min="0" value={itemForm.price || ''} onChange={e => setItemForm({ ...itemForm, price: parseFloat(e.target.value) || 0 })} />
           <Input label="Reihenfolge" type="number" value={itemForm.sort_order} onChange={e => setItemForm({ ...itemForm, sort_order: parseInt(e.target.value) || 0 })} />
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-slate-700">Jeton-Farbe (optional)</label>
+            <select
+              value={itemForm.jeton_type_id ?? ''}
+              onChange={e => setItemForm({ ...itemForm, jeton_type_id: e.target.value ? parseInt(e.target.value) : null })}
+              className="rounded-lg border border-slate-300 px-3 py-2.5"
+            >
+              <option value="">— keine —</option>
+              {jetonTypes.map(jt => (
+                <option key={jt.id} value={jt.id}>{jt.name} ({jt.value.toFixed(2).replace('.', ',')} €)</option>
+              ))}
+            </select>
+          </div>
           <Button onClick={saveItem} size="lg">Speichern</Button>
         </div>
       </Modal>

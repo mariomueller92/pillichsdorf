@@ -4,6 +4,9 @@ import * as ordersApi from '@/api/orders.api';
 import * as billingApi from '@/api/billing.api';
 import * as dashboardApi from '@/api/dashboard.api';
 import { useTablesStore } from '@/stores/tablesStore';
+import { useAuthStore } from '@/stores/authStore';
+import { computeJetonBreakdown, jetonEurSubtotal } from '@/utils/jeton';
+import { JetonBreakdownList } from '@/components/JetonBreakdownList';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Spinner } from '@/components/ui/Spinner';
@@ -28,6 +31,10 @@ interface BarOrder {
     unit_price: number;
     status: string;
     notes: string | null;
+    jeton_type_id?: number | null;
+    jeton_name?: string | null;
+    jeton_color?: string | null;
+    jeton_value?: number | null;
   }>;
 }
 
@@ -39,6 +46,7 @@ const statusConfig: Record<string, { label: string; variant: 'warning' | 'info' 
 
 export function BarOverview() {
   const navigate = useNavigate();
+  const isJeton = useAuthStore(s => s.user?.payment_mode) === 'jeton';
   const [orders, setOrders] = useState<BarOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -92,7 +100,7 @@ export function BarOverview() {
 
   const getTotal = () => {
     if (!summary) return 0;
-    let total = summary.subtotal;
+    let total = isJeton ? jetonEurSubtotal(summary) : summary.subtotal;
     if (discountType === 'percentage') total -= total * discountValue / 100;
     else if (discountType === 'fixed') total -= discountValue;
     return Math.max(0, Math.round(total * 100) / 100);
@@ -170,6 +178,14 @@ export function BarOverview() {
           const total = orderTotal(order);
           const openItems = order.items.filter(i => i.status !== 'serviert' && i.status !== 'storniert');
           const hasReady = openItems.some(i => i.status === 'fertig');
+          const orderJeton = isJeton ? computeJetonBreakdown(openItems.map(i => ({
+            jeton_type_id: i.jeton_type_id ?? null,
+            jeton_name: i.jeton_name,
+            jeton_color: i.jeton_color,
+            jeton_value: i.jeton_value,
+            unit_price: i.unit_price,
+            quantity: i.quantity,
+          }))) : null;
 
           return (
             <div
@@ -186,7 +202,9 @@ export function BarOverview() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{timeStr(order.created_at)}</span>
-                  <span className="font-bold text-primary">{total.toFixed(2).replace('.', ',')} &euro;</span>
+                  {!isJeton && (
+                    <span className="font-bold text-primary">{total.toFixed(2).replace('.', ',')} &euro;</span>
+                  )}
                 </div>
               </div>
 
@@ -201,10 +219,27 @@ export function BarOverview() {
                       {item.quantity}x {item.item_name}
                       {item.notes && <span className="text-xs text-slate-400 ml-1">({item.notes})</span>}
                     </span>
-                    <span className="text-slate-500">{(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;</span>
+                    {isJeton ? (
+                      item.jeton_type_id != null ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                          <span className="w-2.5 h-2.5 rounded-full inline-block border border-slate-200" style={{ background: item.jeton_color ?? undefined }} />
+                          {item.jeton_name}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-700">kein Jeton</span>
+                      )
+                    ) : (
+                      <span className="text-slate-500">{(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;</span>
+                    )}
                   </div>
                 ))}
               </div>
+
+              {isJeton && orderJeton && (orderJeton.breakdown.length > 0 || orderJeton.unassigned) && (
+                <div className="bg-slate-50 rounded-lg p-2.5 mb-3">
+                  <JetonBreakdownList breakdown={orderJeton.breakdown} unassigned={orderJeton.unassigned} />
+                </div>
+              )}
 
               {/* Actions */}
               <div className="flex gap-2">
@@ -238,16 +273,33 @@ export function BarOverview() {
               {summary.items.map((item: any) => (
                 <div key={item.id} className="flex justify-between text-sm">
                   <span>{item.quantity}x {item.item_name}</span>
-                  <span className="font-medium">{(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;</span>
+                  {isJeton ? (
+                    item.jeton_type_id != null ? (
+                      <span className="inline-flex items-center gap-1 font-medium">
+                        <span className="w-2.5 h-2.5 rounded-full inline-block border border-slate-200" style={{ background: item.jeton_color }} />
+                        {item.jeton_name}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-amber-700">kein Jeton</span>
+                    )
+                  ) : (
+                    <span className="font-medium">{(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;</span>
+                  )}
                 </div>
               ))}
             </div>
 
             {/* Subtotal */}
-            <div className="flex justify-between px-1">
-              <span className="text-slate-600">Zwischensumme</span>
-              <span className="font-semibold">{summary.subtotal.toFixed(2).replace('.', ',')} &euro;</span>
-            </div>
+            {isJeton ? (
+              <div className="px-1">
+                <JetonBreakdownList breakdown={summary.jeton_breakdown ?? []} unassigned={summary.jeton_unassigned ?? null} />
+              </div>
+            ) : (
+              <div className="flex justify-between px-1">
+                <span className="text-slate-600">Zwischensumme</span>
+                <span className="font-semibold">{summary.subtotal.toFixed(2).replace('.', ',')} &euro;</span>
+              </div>
+            )}
 
             {/* Discount */}
             <div className="bg-white rounded-lg border border-slate-200 p-3">
@@ -285,8 +337,12 @@ export function BarOverview() {
 
             {/* Total */}
             <div className="flex justify-between items-center px-1">
-              <span className="text-lg font-bold">Gesamt</span>
-              <span className="text-2xl font-bold text-primary">{getTotal().toFixed(2).replace('.', ',')} &euro;</span>
+              <span className={isJeton ? 'text-xs text-slate-400' : 'text-lg font-bold'}>
+                {isJeton ? 'entspricht' : 'Gesamt'}
+              </span>
+              <span className={isJeton ? 'text-sm text-slate-400' : 'text-2xl font-bold text-primary'}>
+                {getTotal().toFixed(2).replace('.', ',')} &euro;
+              </span>
             </div>
 
             <Button variant="success" size="lg" onClick={handleSettle} disabled={settling}>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { BarChart3, RefreshCw, Trophy, Users, Tags, Euro, Trash2 } from 'lucide-react';
+import { BarChart3, RefreshCw, Trophy, Users, Tags, Euro, Trash2, Coins } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
 import * as statsApi from '@/api/stats.api';
 import { useAuthStore } from '@/stores/authStore';
@@ -201,6 +201,28 @@ export function StatsPage() {
               )}
             </Panel>
           </div>
+
+          {/* Jetons je Farbe */}
+          {bundle.jeton_totals.length > 0 && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+              <Panel icon={<Coins size={18} className="text-rose-500" />} title="Jetons je Farbe">
+                <div className="space-y-1.5">
+                  {bundle.jeton_totals.map(jt => (
+                    <div key={jt.jeton_type_id} className="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-slate-50">
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="w-3 h-3 rounded-full inline-block border border-slate-200 shrink-0" style={{ background: jt.color }} />
+                        <span className="font-medium truncate">{jt.name}</span>
+                      </span>
+                      <div className="text-right shrink-0">
+                        <div className="font-semibold tabular-nums">{jt.count}×</div>
+                        <div className="text-[10px] text-slate-400">{euro(jt.subtotal_eur)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Panel>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -34,13 +34,13 @@ router.post('/settle-items', auth, role(['admin', 'kellner']), validate(settleIt
 });
 
 // Order-based billing (bar orders)
-router.get('/order/:orderId/summary', auth, role(['admin', 'kellner']), (req: Request, res: Response, next: NextFunction) => {
+router.get('/order/:orderId/summary', auth, role(['admin', 'kellner', 'schank_kellner', 'kassa_spk']), (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(billingService.getOrderSummary(parseInt(req.params.orderId)));
   } catch (err) { next(err); }
 });
 
-router.post('/order/:orderId/settle', auth, role(['admin', 'kellner']), validate(settleTableSchema), (req: Request, res: Response, next: NextFunction) => {
+router.post('/order/:orderId/settle', auth, role(['admin', 'kellner', 'schank_kellner', 'kassa_spk']), validate(settleTableSchema), (req: Request, res: Response, next: NextFunction) => {
   try {
     const bill = billingService.settleOrder(parseInt(req.params.orderId), req.user!.userId, req.body);
     res.json(bill);

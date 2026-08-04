@@ -14,8 +14,11 @@ import tablesRoutes from './routes/tables.routes.js';
 import ordersRoutes from './routes/orders.routes.js';
 import billingRoutes from './routes/billing.routes.js';
 import statsRoutes from './routes/stats.routes.js';
+import jetonTypesRoutes from './routes/jetonTypes.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 import { initPrinter, setPrinterErrorReporter } from './printer/index.js';
 import { emitPrinterError } from './services/socket.service.js';
+import { getSettings } from './services/settings.service.js';
 
 const app = express();
 const server = createServer(app);
@@ -32,6 +35,8 @@ app.use('/api/tables', tablesRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/jeton-types', jetonTypesRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -47,9 +52,10 @@ if (fs.existsSync(clientDist)) {
   });
 } else {
   app.get('*', (_req, res) => {
+    const companyName = getSettings().company_name;
     res.status(200).send(
       '<html><body style="font-family:sans-serif;text-align:center;padding:60px">' +
-      '<h2>Rainer Wein - Backend laeuft</h2>' +
+      `<h2>${companyName} - Backend laeuft</h2>` +
       '<p>Frontend noch nicht gebaut. Entweder:</p>' +
       '<ul style="list-style:none"><li><b>Dev-Modus:</b> Oeffne <a href="http://localhost:5173">http://localhost:5173</a></li>' +
       '<li><b>Produktion:</b> Fuehre <code>cd client && npm run build</code> aus</li></ul>' +

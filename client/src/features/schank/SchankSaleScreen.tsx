@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useMenuStore } from '@/stores/menuStore';
 import { useOrdersStore } from '@/stores/ordersStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -10,13 +10,12 @@ import { JetonType, MenuItem } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { Modal } from '@/components/ui/Modal';
-import { ShoppingCart, Minus, Plus, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
+import { ShoppingCart, Minus, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
-export function OrderScreen() {
-  const { tischId } = useParams<{ tischId: string }>();
+export function SchankSaleScreen() {
   const navigate = useNavigate();
-  const { categories, items, isLoaded, fetchMenu, getItemsByCategory } = useMenuStore();
+  const { categories, isLoaded, fetchMenu, getItemsByCategory } = useMenuStore();
   const { cart, addToCart, removeFromCart, updateCartQuantity, updateCartItemNotes, clearCart, getCartTotal, submitOrder } = useOrdersStore();
   const isJeton = useAuthStore(s => s.user?.payment_mode) === 'jeton';
   const [jetonTypes, setJetonTypes] = useState<JetonType[]>([]);
@@ -25,9 +24,6 @@ export function OrderScreen() {
   const [orderNotes, setOrderNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [editingNotes, setEditingNotes] = useState<number | null>(null);
-
-  const isBarOrder = !tischId;
-  const tableId = tischId ? parseInt(tischId) : null;
 
   useEffect(() => {
     if (!isLoaded) fetchMenu();
@@ -64,10 +60,9 @@ export function OrderScreen() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
-      await submitOrder(isBarOrder ? null : tableId, orderNotes || undefined);
-      toast.success('Bestellung gesendet!');
+      const order = await submitOrder(null, orderNotes || undefined);
       setShowCart(false);
-      navigate(isBarOrder ? '/bar' : '/tische');
+      navigate(`/schank/kassieren/${order.id}`);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Fehler beim Senden');
     } finally {
@@ -85,12 +80,7 @@ export function OrderScreen() {
     <div className="flex flex-col" style={{ height: 'calc(100dvh - 7rem)' }}>
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 shrink-0">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-lg hover:bg-slate-100 active:scale-90">
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="text-lg font-bold flex-1">
-          {isBarOrder ? 'Barverkauf' : `Tisch ${tischId} - Bestellung`}
-        </h1>
+        <h1 className="text-lg font-bold flex-1">Verkauf</h1>
         {cartCount > 0 && (
           <button onClick={() => setShowCart(true)} className="relative p-2 rounded-lg hover:bg-slate-100">
             <ShoppingCart size={20} />
@@ -286,7 +276,7 @@ export function OrderScreen() {
               Leeren
             </Button>
             <Button variant="success" onClick={handleSubmit} disabled={submitting} className="flex-2" size="lg">
-              {submitting ? 'Sende...' : 'Bestellung senden'}
+              {submitting ? 'Wird abgeschlossen...' : 'Bestellung abschließen'}
             </Button>
           </div>
         </div>

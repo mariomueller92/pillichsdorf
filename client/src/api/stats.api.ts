@@ -30,11 +30,21 @@ export interface StatsByCategory {
   item_count: number;
 }
 
+export interface StatsJetonTotal {
+  jeton_type_id: number;
+  name: string;
+  color: string;
+  value: number;
+  count: number;
+  subtotal_eur: number;
+}
+
 export interface StatsBundle {
   summary: StatsSummary;
   top_items: StatsTopItem[];
   by_waiter: StatsByWaiter[];
   by_category: StatsByCategory[];
+  jeton_totals: StatsJetonTotal[];
 }
 
 export async function getStats(from?: Date | null, to?: Date | null, limit: number = 10): Promise<StatsBundle> {

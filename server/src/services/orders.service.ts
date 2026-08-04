@@ -3,6 +3,7 @@ import { Order, OrderItem, OrderItemStatus } from '../shared/types.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as socketService from './socket.service.js';
 import { printUnifiedBon } from '../printer/templates.js';
+import { JETON_ITEM_JOIN, JETON_ITEM_COLUMNS } from './billing.service.js';
 
 export function listOrders(filters: { table_id?: number; status?: string; waiter_id?: number }) {
   const db = getDb();
@@ -36,10 +37,12 @@ export function getOrder(id: number) {
   if (!order) throw new AppError(404, 'Bestellung nicht gefunden');
 
   const items = db.prepare(`
-    SELECT oi.*, mi.name as item_name, mi.availability_mode, mc.target as category_target, mc.name as category_name
+    SELECT oi.*, mi.name as item_name, mi.availability_mode, mc.target as category_target, mc.name as category_name,
+           ${JETON_ITEM_COLUMNS}
     FROM order_items oi
     JOIN menu_items mi ON oi.menu_item_id = mi.id
     JOIN menu_categories mc ON mi.category_id = mc.id
+    ${JETON_ITEM_JOIN}
     WHERE oi.order_id = ?
     ORDER BY oi.created_at
   `).all(id);
@@ -302,6 +305,14 @@ function recalcOrderStatus(orderId: number) {
 export function cancelOrder(orderId: number) {
   const db = getDb();
   const order = getOrder(orderId);
+
+  const billedCount = db.prepare(`
+    SELECT COUNT(*) as count FROM bill_items
+    WHERE order_item_id IN (SELECT id FROM order_items WHERE order_id = ?)
+  `).get(orderId) as { count: number };
+  if (billedCount.count > 0) {
+    throw new AppError(400, 'Bestellung bereits abgerechnet');
+  }
 
   db.transaction(() => {
     db.prepare("UPDATE orders SET status = 'storniert', updated_at = datetime('now') WHERE id = ?").run(orderId);

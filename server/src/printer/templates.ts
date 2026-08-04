@@ -1,5 +1,5 @@
 import { buildReceipt, printRaw, isPrinterEnabled } from './index.js';
-import { config } from '../config.js';
+import { getSettings } from '../services/settings.service.js';
 
 interface UnifiedBonItem {
   quantity: number;
@@ -30,6 +30,9 @@ interface BillBonData {
   discountValue?: number;
   total: number;
   splitPart?: { index: number; total: number } | null;
+  paymentMode?: 'bargeld' | 'jeton';
+  jetonBreakdown?: Array<{ name: string; color: string; count: number }>;
+  jetonUnassigned?: { count: number; eur: number } | null;
 }
 
 const CUT_MARK_LINE = '- - - - - - - - - - - - - - - -';
@@ -142,6 +145,7 @@ export function printUnifiedBon(data: UnifiedBonData): boolean {
 export function printBillBon(data: BillBonData): boolean {
   if (!isPrinterEnabled()) return false;
 
+  const settings = getSettings();
   const now = new Date();
   const isBar = !data.tableNumber;
   const tischLabel = data.tableNumber ? `TISCH ${data.tableNumber}` : (data.barSlot ? `BAR ${data.barSlot}` : 'KEIN TISCH');
@@ -150,11 +154,11 @@ export function printBillBon(data: BillBonData): boolean {
 
   // Company header
   r.center().bold(true).big(true)
-    .line(config.company.name)
+    .line(settings.company_name)
     .big(false);
-  if (config.company.address1) r.line(config.company.address1);
-  if (config.company.address2) r.line(config.company.address2);
-  if (config.company.betriebsnummer) r.line(`Betriebs-Nr.: ${config.company.betriebsnummer}`);
+  if (settings.company_address1) r.line(settings.company_address1);
+  if (settings.company_address2) r.line(settings.company_address2);
+  if (settings.company_betriebsnummer) r.line(`Betriebs-Nr.: ${settings.company_betriebsnummer}`);
   r.bold(false).separator('=');
 
   // Barverkauf oder Tisch - gross oben
@@ -172,36 +176,67 @@ export function printBillBon(data: BillBonData): boolean {
     .line(`Kellner: ${data.waiterName}`)
     .separator();
 
-  for (const item of data.items) {
-    const total = (item.unit_price * item.quantity).toFixed(2);
-    // grössere Schrift
-    r.big(true).row(`${item.quantity}x ${item.item_name}`, total).big(false);
+  if (data.paymentMode === 'jeton' && data.jetonBreakdown) {
+    // Positionen ohne EUR-Betraege - der Kellner interessiert sich fuer die Jeton-Stueckzahl
+    for (const item of data.items) {
+      r.big(true).line(`${item.quantity}x ${item.item_name}`).big(false);
+    }
+
+    r.separator('=')
+      .center().bold(true).big(true).line('FAELLIGE JETONS').big(false).bold(false).left()
+      .separator();
+
+    for (const b of data.jetonBreakdown) {
+      r.bold(true).huge(true).row(`${b.count}x ${b.name}`, '').huge(false).bold(false);
+    }
+
+    if (data.jetonUnassigned) {
+      r.line(`+ ${data.jetonUnassigned.count} Pos. ohne Zuordnung (${data.jetonUnassigned.eur.toFixed(2)} EUR)`);
+    }
+
+    if (data.discountType && data.discountValue && data.discountValue > 0) {
+      const label = data.discountType === 'percentage'
+        ? `Rabatt (${data.discountValue}%)`
+        : 'Rabatt';
+      r.line(`${label} bereits beruecksichtigt`);
+    }
+
+    r.separator('=')
+      .line(`(entspricht ${data.total.toFixed(2)} EUR)`)
+      .separator('=')
+      .center().line(settings.company_footer);
+  } else {
+    for (const item of data.items) {
+      const total = (item.unit_price * item.quantity).toFixed(2);
+      // grössere Schrift
+      r.big(true).row(`${item.quantity}x ${item.item_name}`, total).big(false);
+    }
+
+    r.separator()
+      .row('Zwischensumme:', data.subtotal.toFixed(2));
+
+    if (data.discountType && data.discountValue && data.discountValue > 0) {
+      const label = data.discountType === 'percentage'
+        ? `Rabatt (${data.discountValue}%):`
+        : 'Rabatt:';
+      const amount = data.discountType === 'percentage'
+        ? (data.subtotal * data.discountValue / 100).toFixed(2)
+        : data.discountValue.toFixed(2);
+      r.row(label, `-${amount}`);
+    }
+
+    r.separator('=')
+      .bold(true).huge(true)
+      .row('GESAMT:', `${data.total.toFixed(2)} EUR`)
+      .huge(false).bold(false)
+      .separator('=')
+      .center().line(settings.company_footer);
   }
 
-  r.separator()
-    .row('Zwischensumme:', data.subtotal.toFixed(2));
-
-  if (data.discountType && data.discountValue && data.discountValue > 0) {
-    const label = data.discountType === 'percentage'
-      ? `Rabatt (${data.discountValue}%):`
-      : 'Rabatt:';
-    const amount = data.discountType === 'percentage'
-      ? (data.subtotal * data.discountValue / 100).toFixed(2)
-      : data.discountValue.toFixed(2);
-    r.row(label, `-${amount}`);
-  }
-
-  r.separator('=')
-    .bold(true).huge(true)
-    .row('GESAMT:', `${data.total.toFixed(2)} EUR`)
-    .huge(false).bold(false)
-    .separator('=')
-    .center().line(config.company.footer)
-    .feed(1)
-    .line('Rainer Wein')
-    .line('Weingut Zechmeister')
-    .line('Boindlfeld')
-    .line('2211 Pillichsdorf')
+  r.feed(1).line(settings.company_name);
+  if (settings.company_address1) r.line(settings.company_address1);
+  if (settings.company_address2) r.line(settings.company_address2);
+  r
     .feed(1)
     .line('Powered by (c) MMUELLER')
     .feed(1);

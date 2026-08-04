@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { PinPad } from '@/components/PinPad';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -13,12 +14,15 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { loginWithPin, loginWithCredentials } = useAuthStore();
+  const companyName = useSettingsStore(s => s.companyName);
 
   const redirectByRole = (role: string) => {
     switch (role) {
       case 'admin': navigate('/tische', { replace: true }); break;
       case 'kellner': navigate('/tische', { replace: true }); break;
       case 'kueche_schank': navigate('/zentral', { replace: true }); break;
+      case 'schank_kellner': navigate('/schank/verkauf', { replace: true }); break;
+      case 'kassa_spk': navigate('/kassa', { replace: true }); break;
       default: navigate('/tische', { replace: true });
     }
   };
@@ -55,7 +59,7 @@ export function LoginPage() {
   return (
     <div className="min-h-dvh bg-slate-800 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-white text-center mb-2">Rainer Wein</h1>
+        <h1 className="text-2xl font-bold text-white text-center mb-2">{companyName}</h1>
         <p className="text-slate-400 text-center mb-8">Anmeldung</p>
 
         {/* Mode toggle */}

@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
-import { LayoutGrid, Monitor, Beer, ClipboardList, Settings, BarChart3 } from 'lucide-react';
+import { LayoutGrid, Monitor, Beer, ClipboardList, Settings, BarChart3, ShoppingCart, Landmark, History } from 'lucide-react';
 
 export function BottomNav() {
   const user = useAuthStore(s => s.user);
@@ -41,6 +41,26 @@ export function BottomNav() {
             <NavLink to="/statistik" className={linkClass}>
               <BarChart3 size={20} />
               <span>Statistik</span>
+            </NavLink>
+          </>
+        )}
+        {/* Schank-Kellner sieht: Verkauf (Speisekarte + Bestellen) */}
+        {(user.role === 'schank_kellner' || user.role === 'admin') && (
+          <NavLink to="/schank/verkauf" className={linkClass}>
+            <ShoppingCart size={20} />
+            <span>Verkauf</span>
+          </NavLink>
+        )}
+        {/* Kassa-SPK sieht: Kassa + Historie */}
+        {(user.role === 'kassa_spk' || user.role === 'admin') && (
+          <>
+            <NavLink to="/kassa" className={linkClass}>
+              <Landmark size={20} />
+              <span>Kassa</span>
+            </NavLink>
+            <NavLink to="/kassa/historie" className={linkClass}>
+              <History size={20} />
+              <span>Historie</span>
             </NavLink>
           </>
         )}

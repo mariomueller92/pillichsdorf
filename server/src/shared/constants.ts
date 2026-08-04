@@ -1,4 +1,4 @@
-export const ROLES = ['admin', 'kellner', 'kueche_schank'] as const;
+export const ROLES = ['admin', 'kellner', 'kueche_schank', 'schank_kellner', 'kassa_spk'] as const;
 
 export const TABLE_STATUSES = ['frei', 'besetzt'] as const;
 
@@ -11,3 +11,5 @@ export const ORDER_ITEM_STATUSES = ['neu', 'in_zubereitung', 'fertig', 'serviert
 export const CATEGORY_TARGETS = ['kueche', 'schank'] as const;
 
 export const DISCOUNT_TYPES = ['percentage', 'fixed'] as const;
+
+export const PAYMENT_MODES = ['bargeld', 'jeton'] as const;

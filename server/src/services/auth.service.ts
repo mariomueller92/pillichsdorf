@@ -36,6 +36,7 @@ export function loginWithCredentials(username: string, password: string) {
       display_name: user.display_name,
       role: user.role,
       username: user.username,
+      payment_mode: user.payment_mode,
     },
   };
 }
@@ -55,6 +56,7 @@ export function loginWithPin(pin: string) {
           display_name: user.display_name,
           role: user.role,
           username: user.username,
+          payment_mode: user.payment_mode,
         },
       };
     }
@@ -68,7 +70,7 @@ export function getUserFromToken(token: string) {
     const payload = jwt.verify(token, config.jwtSecret) as JwtPayload;
     const db = getDb();
     const user = db.prepare(
-      'SELECT id, username, display_name, role, is_active FROM users WHERE id = ? AND is_active = 1'
+      'SELECT id, username, display_name, role, payment_mode, is_active FROM users WHERE id = ? AND is_active = 1'
     ).get(payload.userId) as any;
     if (!user) throw new AppError(401, 'Benutzer nicht gefunden');
     return user;

@@ -14,6 +14,8 @@ import * as billingApi from '@/api/billing.api';
 import { toast } from 'sonner';
 import { Plus, ArrowRightLeft, Merge, Receipt, Bell, Truck, Clock, DoorOpen, Printer } from 'lucide-react';
 import { formatDbTimeHM, minutesSince } from '@/utils/time';
+import { jetonEurSubtotal } from '@/utils/jeton';
+import { JetonBreakdownList } from '@/components/JetonBreakdownList';
 
 const itemStatusBadge: Record<string, { label: string; variant: 'warning' | 'info' | 'success' | 'danger' | 'neutral' }> = {
   neu: { label: 'Warten', variant: 'warning' },
@@ -42,6 +44,7 @@ export function TableDetail() {
   const fetchTables = useTablesStore(s => s.fetchTables);
   const user = useAuthStore(s => s.user);
   const canSetWaiting = user?.role === 'kueche_schank' || user?.role === 'admin';
+  const isJeton = user?.payment_mode === 'jeton';
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 30000);
@@ -212,28 +215,42 @@ export function TableDetail() {
           <div className="px-4 py-2 border-b border-slate-100 text-xs font-medium text-slate-500">
             Offene Posten
           </div>
-          {(() => {
-            const agg = new Map<number, { item_name: string; quantity: number; unit_price: number }>();
-            for (const it of billSummary.items as any[]) {
-              const existing = agg.get(it.menu_item_id);
-              if (existing) existing.quantity += it.quantity;
-              else agg.set(it.menu_item_id, { item_name: it.item_name, quantity: it.quantity, unit_price: it.unit_price });
-            }
-            return Array.from(agg.values()).map((row, idx) => (
-              <div key={idx} className="flex justify-between items-center px-4 py-2 border-b border-slate-100 last:border-b-0 text-sm">
-                <span className="font-medium">{row.quantity}x {row.item_name}</span>
-                <span className="font-medium tabular-nums">
-                  {(row.unit_price * row.quantity).toFixed(2).replace('.', ',')} &euro;
+          {isJeton ? (
+            <div className="p-4">
+              <JetonBreakdownList breakdown={billSummary.jeton_breakdown ?? []} unassigned={billSummary.jeton_unassigned ?? null} />
+              <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100">
+                <span className="text-xs text-slate-400">entspricht</span>
+                <span className="text-sm text-slate-400 tabular-nums">
+                  {jetonEurSubtotal(billSummary).toFixed(2).replace('.', ',')} &euro;
                 </span>
               </div>
-            ));
-          })()}
-          <div className="flex justify-between items-center px-4 py-2.5 bg-slate-50 rounded-b-xl">
-            <span className="font-bold">Gesamt offen</span>
-            <span className="font-bold text-lg text-primary tabular-nums">
-              {billSummary.subtotal.toFixed(2).replace('.', ',')} &euro;
-            </span>
-          </div>
+            </div>
+          ) : (
+            <>
+              {(() => {
+                const agg = new Map<number, { item_name: string; quantity: number; unit_price: number }>();
+                for (const it of billSummary.items as any[]) {
+                  const existing = agg.get(it.menu_item_id);
+                  if (existing) existing.quantity += it.quantity;
+                  else agg.set(it.menu_item_id, { item_name: it.item_name, quantity: it.quantity, unit_price: it.unit_price });
+                }
+                return Array.from(agg.values()).map((row, idx) => (
+                  <div key={idx} className="flex justify-between items-center px-4 py-2 border-b border-slate-100 last:border-b-0 text-sm">
+                    <span className="font-medium">{row.quantity}x {row.item_name}</span>
+                    <span className="font-medium tabular-nums">
+                      {(row.unit_price * row.quantity).toFixed(2).replace('.', ',')} &euro;
+                    </span>
+                  </div>
+                ));
+              })()}
+              <div className="flex justify-between items-center px-4 py-2.5 bg-slate-50 rounded-b-xl">
+                <span className="font-bold">Gesamt offen</span>
+                <span className="font-bold text-lg text-primary tabular-nums">
+                  {billSummary.subtotal.toFixed(2).replace('.', ',')} &euro;
+                </span>
+              </div>
+            </>
+          )}
         </div>
       )}
 

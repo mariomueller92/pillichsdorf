@@ -72,7 +72,20 @@ export function runMigrations(): void {
       password_hash   TEXT,
       pin_hash        TEXT,
       display_name    TEXT    NOT NULL,
-      role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank')),
+      role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner', 'kassa_spk')),
+      payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
+                      CHECK (payment_mode IN ('bargeld', 'jeton')),
+      is_active       INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS jeton_types (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL,
+      color           TEXT    NOT NULL,
+      value           REAL    NOT NULL CHECK (value >= 0),
+      sort_order      INTEGER NOT NULL DEFAULT 0,
       is_active       INTEGER NOT NULL DEFAULT 1,
       created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -98,6 +111,7 @@ export function runMigrations(): void {
       is_available    INTEGER NOT NULL DEFAULT 1,
       availability_mode TEXT  NOT NULL DEFAULT 'sofort'
                       CHECK (availability_mode IN ('sofort', 'lieferzeit')),
+      jeton_type_id   INTEGER REFERENCES jeton_types(id) ON DELETE SET NULL,
       is_active       INTEGER NOT NULL DEFAULT 1,
       created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -150,6 +164,8 @@ export function runMigrations(): void {
       discount_type   TEXT    CHECK (discount_type IN ('percentage', 'fixed')),
       discount_value  REAL    DEFAULT 0,
       total           REAL    NOT NULL,
+      payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
+                      CHECK (payment_mode IN ('bargeld', 'jeton')),
       notes           TEXT,
       created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
     );
@@ -160,6 +176,18 @@ export function runMigrations(): void {
       order_item_id   INTEGER NOT NULL REFERENCES order_items(id),
       quantity        INTEGER NOT NULL DEFAULT 1,
       unit_price      REAL    NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      id                      INTEGER PRIMARY KEY CHECK (id = 1),
+      company_name            TEXT    NOT NULL DEFAULT 'RAINER WEIN',
+      company_address1        TEXT    NOT NULL DEFAULT '',
+      company_address2        TEXT    NOT NULL DEFAULT '',
+      company_betriebsnummer  TEXT    NOT NULL DEFAULT '',
+      company_footer          TEXT    NOT NULL DEFAULT 'Vielen Dank!',
+      printer_name             TEXT   NOT NULL DEFAULT 'Knub Thermica',
+      printer_width            INTEGER NOT NULL DEFAULT 58,
+      updated_at              TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_menu_items_category ON menu_items(category_id);
@@ -205,6 +233,114 @@ export function runMigrations(): void {
   if (!menuItemCols.some(c => c.name === 'availability_mode')) {
     database.exec("ALTER TABLE menu_items ADD COLUMN availability_mode TEXT NOT NULL DEFAULT 'sofort' CHECK (availability_mode IN ('sofort', 'lieferzeit'))");
     console.log('[DB] Migration: Spalte menu_items.availability_mode hinzugefügt');
+  }
+  if (!menuItemCols.some(c => c.name === 'jeton_type_id')) {
+    database.exec("ALTER TABLE menu_items ADD COLUMN jeton_type_id INTEGER REFERENCES jeton_types(id) ON DELETE SET NULL");
+    database.exec("CREATE INDEX IF NOT EXISTS idx_menu_items_jeton_type ON menu_items(jeton_type_id)");
+    console.log('[DB] Migration: Spalte menu_items.jeton_type_id hinzugefügt');
+  }
+
+  const userCols = database.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!userCols.some(c => c.name === 'payment_mode')) {
+    database.exec("ALTER TABLE users ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'bargeld' CHECK (payment_mode IN ('bargeld', 'jeton'))");
+    console.log('[DB] Migration: Spalte users.payment_mode hinzugefügt');
+  }
+
+  // CHECK-Constraint auf users.role erweitern um 'schank_kellner' (SQLite kann CHECKs
+  // nicht per ALTER TABLE ändern -> Tabelle nach dokumentiertem Muster neu aufbauen).
+  const usersTableDef = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+  ).get() as { sql: string } | undefined;
+  if (usersTableDef && !usersTableDef.sql.includes('schank_kellner')) {
+    database.pragma('foreign_keys = OFF');
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE users_new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          username        TEXT    UNIQUE,
+          password_hash   TEXT,
+          pin_hash        TEXT,
+          display_name    TEXT    NOT NULL,
+          role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner')),
+          payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
+                          CHECK (payment_mode IN ('bargeld', 'jeton')),
+          is_active       INTEGER NOT NULL DEFAULT 1,
+          created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO users_new (id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at)
+          SELECT id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+      `);
+    })();
+    const fkIssues = database.prepare('PRAGMA foreign_key_check').all();
+    if (fkIssues.length > 0) {
+      throw new Error('[DB] Migration users.role-CHECK: Fremdschlüssel-Inkonsistenz nach Rebuild: ' + JSON.stringify(fkIssues));
+    }
+    database.pragma('foreign_keys = ON');
+    console.log("[DB] Migration: users.role-CHECK um 'schank_kellner' erweitert");
+  }
+
+  // CHECK-Constraint auf users.role erweitern um 'kassa_spk' (gleiches Muster wie oben).
+  const usersTableDef2 = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+  ).get() as { sql: string } | undefined;
+  if (usersTableDef2 && !usersTableDef2.sql.includes('kassa_spk')) {
+    database.pragma('foreign_keys = OFF');
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE users_new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          username        TEXT    UNIQUE,
+          password_hash   TEXT,
+          pin_hash        TEXT,
+          display_name    TEXT    NOT NULL,
+          role            TEXT    NOT NULL CHECK (role IN ('admin', 'kellner', 'kueche_schank', 'schank_kellner', 'kassa_spk')),
+          payment_mode    TEXT    NOT NULL DEFAULT 'bargeld'
+                          CHECK (payment_mode IN ('bargeld', 'jeton')),
+          is_active       INTEGER NOT NULL DEFAULT 1,
+          created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO users_new (id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at)
+          SELECT id, username, password_hash, pin_hash, display_name, role, payment_mode, is_active, created_at, updated_at FROM users;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+      `);
+    })();
+    const fkIssues2 = database.prepare('PRAGMA foreign_key_check').all();
+    if (fkIssues2.length > 0) {
+      throw new Error('[DB] Migration users.role-CHECK (kassa_spk): Fremdschlüssel-Inkonsistenz nach Rebuild: ' + JSON.stringify(fkIssues2));
+    }
+    database.pragma('foreign_keys = ON');
+    console.log("[DB] Migration: users.role-CHECK um 'kassa_spk' erweitert");
+  }
+
+  const billCols = database.prepare("PRAGMA table_info(bills)").all() as { name: string }[];
+  if (!billCols.some(c => c.name === 'payment_mode')) {
+    database.exec("ALTER TABLE bills ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'bargeld' CHECK (payment_mode IN ('bargeld', 'jeton'))");
+    console.log('[DB] Migration: Spalte bills.payment_mode hinzugefügt');
+  }
+
+  // Einmalige Erstbefuellung der settings-Zeile aus den bisherigen .env-Werten,
+  // damit bestehende Installationen nach dem Umstieg auf admin-editierbare
+  // Einstellungen unveraendert weiterlaufen (kein Verhaltensbruch beim Update).
+  const settingsRow = database.prepare('SELECT id FROM settings WHERE id = 1').get();
+  if (!settingsRow) {
+    database.prepare(`
+      INSERT INTO settings (id, company_name, company_address1, company_address2, company_betriebsnummer, company_footer, printer_name, printer_width)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      process.env.COMPANY_NAME || 'RAINER WEIN',
+      process.env.COMPANY_ADDRESS1 || '',
+      process.env.COMPANY_ADDRESS2 || '',
+      process.env.COMPANY_BETRIEBSNUMMER || '',
+      process.env.COMPANY_FOOTER || 'Vielen Dank!',
+      process.env.PRINTER_NAME || 'Knub Thermica',
+      parseInt(process.env.PRINTER_WIDTH || '58', 10)
+    );
+    console.log('[DB] Migration: settings-Zeile aus .env-Werten angelegt');
   }
 
   // ----------------------------------------------------------------
@@ -413,6 +549,22 @@ export async function seedDefaultData(): Promise<void> {
     const pinHash = await bcrypt.hash('9999', 10);
     database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash, 'Schank-Chef', 'kueche_schank');
     console.log('[DB] Demo-Schank-Chef erstellt (PIN: 9999)');
+  }
+
+  // Schank-Kellner (Verkauf direkt an der Schank, ohne Tisch/Status-Tracking)
+  const existingSchankKellner = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Schank-Kellner');
+  if (!existingSchankKellner) {
+    const pinHash = await bcrypt.hash('8888', 10);
+    database.prepare(`INSERT INTO users (pin_hash, display_name, role) VALUES (?, ?, ?)`).run(pinHash, 'Schank-Kellner', 'schank_kellner');
+    console.log('[DB] Demo-Schank-Kellner erstellt (PIN: 8888)');
+  }
+
+  // Kassa-SPK (Zentralkasse, 8-stelliger PIN, zahlt immer in Jetons)
+  const existingKassaSpk = database.prepare('SELECT id FROM users WHERE display_name = ?').get('Kassa-SPK');
+  if (!existingKassaSpk) {
+    const pinHash = await bcrypt.hash('12345678', 10);
+    database.prepare(`INSERT INTO users (pin_hash, display_name, role, payment_mode) VALUES (?, ?, ?, ?)`).run(pinHash, 'Kassa-SPK', 'kassa_spk', 'jeton');
+    console.log('[DB] Demo-Kassa-SPK erstellt (PIN: 12345678)');
   }
 
   // Tables

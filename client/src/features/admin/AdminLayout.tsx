@@ -11,7 +11,9 @@ export function AdminLayout() {
       <div className="bg-slate-200 overflow-x-auto">
         <div className="flex gap-1 px-4 pt-2">
           <NavLink to="/admin/speisekarte" className={tabClass}>Speisekarte</NavLink>
+          <NavLink to="/admin/jeton-typen" className={tabClass}>Jetons</NavLink>
           <NavLink to="/admin/tische" className={tabClass}>Tische</NavLink>
+          <NavLink to="/admin/einstellungen" className={tabClass}>Einstellungen</NavLink>
           <NavLink to="/admin/benutzer" className={tabClass}>Benutzer</NavLink>
           <NavLink to="/admin/bestellungen" className={tabClass}>Bestellungen</NavLink>
         </div>

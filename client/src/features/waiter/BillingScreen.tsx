@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import * as billingApi from '@/api/billing.api';
 import * as tablesApi from '@/api/tables.api';
 import * as ordersApi from '@/api/orders.api';
+import { useAuthStore } from '@/stores/authStore';
+import { computeJetonBreakdown } from '@/utils/jeton';
 import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import { toast } from 'sonner';
@@ -18,6 +20,7 @@ const statusLabel: Record<string, string> = {
 export function BillingScreen() {
   const { tischId } = useParams<{ tischId: string }>();
   const navigate = useNavigate();
+  const paymentMode = useAuthStore(s => s.user?.payment_mode) ?? 'bargeld';
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [discountType, setDiscountType] = useState<'percentage' | 'fixed' | null>(null);
@@ -55,9 +58,17 @@ export function BillingScreen() {
   const selectedSubtotal = summary?.items
     .reduce((s: number, i: any) => s + i.unit_price * (selected.get(i.id) ?? 0), 0) ?? 0;
 
+  const isJeton = paymentMode === 'jeton';
+  const fullJetonBreakdown = summary?.jeton_breakdown ?? [];
+  const fullJetonUnassigned = summary?.jeton_unassigned ?? null;
+  const jetonEurSubtotal = fullJetonBreakdown.reduce((s: number, b: any) => s + b.subtotal_eur, 0) + (fullJetonUnassigned?.eur ?? 0);
+  const selectedJeton = summary
+    ? computeJetonBreakdown(summary.items.map((i: any) => ({ ...i, quantity: selected.get(i.id) ?? 0 })))
+    : { breakdown: [], unassigned: null };
+
   const getTotal = () => {
     if (!summary) return 0;
-    let total = summary.subtotal;
+    let total = isJeton ? jetonEurSubtotal : summary.subtotal;
     if (discountType === 'percentage') {
       total -= total * discountValue / 100;
     } else if (discountType === 'fixed') {
@@ -244,6 +255,16 @@ export function BillingScreen() {
                 )}
                 <div className="min-w-0">
                   <span className="font-medium text-sm">{item.quantity}x {item.item_name}</span>
+                  {isJeton && (
+                    item.jeton_type_id != null ? (
+                      <span className="ml-2 inline-flex items-center gap-1 text-xs text-slate-500">
+                        <span className="w-2.5 h-2.5 rounded-full inline-block border border-slate-200" style={{ background: item.jeton_color }} />
+                        {item.jeton_name}
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-xs text-amber-700">kein Jeton zugeordnet</span>
+                    )
+                  )}
                   {undelivered && (
                     <span className="ml-2 inline-flex items-center gap-1 text-xs text-amber-700">
                       <AlertTriangle size={12} /> {statusLabel[item.status] ?? item.status}
@@ -254,7 +275,9 @@ export function BillingScreen() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="font-medium text-sm">
-                  {(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} &euro;
+                  {isJeton
+                    ? (item.jeton_type_id != null ? `${item.quantity}x` : `${(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} €`)
+                    : `${(item.unit_price * item.quantity).toFixed(2).replace('.', ',')} €`}
                 </span>
                 {!splitMode && (
                   <button
@@ -296,8 +319,31 @@ export function BillingScreen() {
               </div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-slate-500">Auswahl-Summe</div>
-              <div className="font-bold">{selectedSubtotal.toFixed(2).replace('.', ',')} &euro;</div>
+              {isJeton ? (
+                <>
+                  <div className="text-xs text-slate-500">Auswahl-Jetons</div>
+                  {selectedJeton.breakdown.length === 0 && !selectedJeton.unassigned ? (
+                    <div className="font-bold text-slate-400">-</div>
+                  ) : (
+                    <div className="flex flex-col items-end">
+                      {selectedJeton.breakdown.map(b => (
+                        <div key={b.jeton_type_id} className="flex items-center gap-1 text-sm font-bold">
+                          <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: b.color }} />
+                          {b.count}x {b.name}
+                        </div>
+                      ))}
+                      {selectedJeton.unassigned && (
+                        <div className="text-xs text-amber-700">+{selectedJeton.unassigned.count} unzugeordnet</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-xs text-slate-500">Auswahl-Summe</div>
+                  <div className="font-bold">{selectedSubtotal.toFixed(2).replace('.', ',')} &euro;</div>
+                </>
+              )}
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -336,11 +382,37 @@ export function BillingScreen() {
         </div>
       )}
 
-      {/* Subtotal */}
-      <div className="flex justify-between items-center mb-3 px-1">
-        <span className="text-slate-600">Zwischensumme</span>
-        <span className="font-semibold">{summary.subtotal.toFixed(2).replace('.', ',')} &euro;</span>
-      </div>
+      {/* Subtotal / Jeton breakdown */}
+      {isJeton ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+          <div className="text-sm font-medium mb-2">Fällige Jetons</div>
+          {fullJetonBreakdown.length === 0 && !fullJetonUnassigned ? (
+            <div className="text-slate-400 text-sm">Keine Positionen</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {fullJetonBreakdown.map((b: any) => (
+                <div key={b.jeton_type_id} className="flex items-center justify-between py-1">
+                  <span className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full inline-block border border-slate-200" style={{ background: b.color }} />
+                    {b.name}
+                  </span>
+                  <span className="font-bold tabular-nums">{b.count}x</span>
+                </div>
+              ))}
+              {fullJetonUnassigned && (
+                <div className="text-xs text-amber-700 mt-1">
+                  {fullJetonUnassigned.count} Position(en) ohne Jeton-Zuordnung – wird in EUR verrechnet ({fullJetonUnassigned.eur.toFixed(2).replace('.', ',')} &euro;)
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex justify-between items-center mb-3 px-1">
+          <span className="text-slate-600">Zwischensumme</span>
+          <span className="font-semibold">{summary.subtotal.toFixed(2).replace('.', ',')} &euro;</span>
+        </div>
+      )}
 
       {/* Discount */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
@@ -368,7 +440,7 @@ export function BillingScreen() {
             type="number"
             min="0"
             step={discountType === 'percentage' ? '1' : '0.5'}
-            max={discountType === 'percentage' ? '100' : summary.subtotal}
+            max={discountType === 'percentage' ? '100' : (isJeton ? jetonEurSubtotal : summary.subtotal)}
             value={discountValue || ''}
             onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
             placeholder={discountType === 'percentage' ? 'z.B. 10' : 'z.B. 5.00'}
@@ -378,12 +450,19 @@ export function BillingScreen() {
       </div>
 
       {/* Total */}
-      <div className="flex justify-between items-center mb-4 px-1">
-        <span className="text-lg font-bold">Gesamt</span>
-        <span className="text-2xl font-bold text-primary">
-          {getTotal().toFixed(2).replace('.', ',')} &euro;
-        </span>
-      </div>
+      {isJeton ? (
+        <div className="flex justify-between items-center mb-4 px-1">
+          <span className="text-xs text-slate-400">entspricht</span>
+          <span className="text-sm text-slate-400">{getTotal().toFixed(2).replace('.', ',')} &euro;</span>
+        </div>
+      ) : (
+        <div className="flex justify-between items-center mb-4 px-1">
+          <span className="text-lg font-bold">Gesamt</span>
+          <span className="text-2xl font-bold text-primary">
+            {getTotal().toFixed(2).replace('.', ',')} &euro;
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <Button
